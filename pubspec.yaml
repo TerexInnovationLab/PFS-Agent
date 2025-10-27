@@ -37,13 +37,23 @@ dependencies:
   flutter_native_splash: ^2.4.0
   flutter_launcher_icons: ^0.14.4
   intl_phone_field: ^3.1.0
+  fl_chart: ^0.65.0
+  carousel_slider: 4.0.0
+  # file_picker: ^5.2.6
+  # signature: ^5.4.1
+  # image_picker: ^1.0.7
+
+
+
+
+
 
 flutter_native_splash:
   android: true
   ios: true
   web: false
 
-  background_image: "assets/images/Splash Screen 1.png"
+  background_image: "assets/images/Splash Screen 5.png"
   
 
 flutter_launcher_icons:
@@ -77,6 +87,7 @@ flutter:
   assets:
     - assets/icons/
     - assets/images/
+    - assets/icons/
 
 
   # An image asset can refer to one or more resolution-specific "variants", see
