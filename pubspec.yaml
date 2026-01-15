@@ -70,11 +70,11 @@ flutter_native_splash:
   web: false
 
   color: "#ffffff"
-  image: assets/icons/Pinnacle Logo.png
+  image: assets/icons/white.png
 
   android_12:
     color: "#ffffff"
-    image: assets/icons/Pinnacle Logo.png
+    image: assets/icons/white.png
     icon_background_color: "#ffffff"
 
   

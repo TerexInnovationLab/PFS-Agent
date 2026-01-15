@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:pfs_agent/layouts/Colors.dart';
 import 'package:pfs_agent/pages/Home.dart';
+import 'package:pfs_agent/pages/forgot_password.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -357,7 +358,10 @@ class _LoginPageState extends State<LoginPage> {
                                       ],
                                     ),
                                     TextButton(
-                                      onPressed: () {},
+                                      onPressed: () {
+
+                                         Navigator.push(context, MaterialPageRoute(builder: (context) => const ForgotPasswordPage()));
+                                      },
                                       child: const Text('Forgot password?', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: AppColors.primary)),
                                     ),
                                   ],
