@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:pfs_agent/pages/Home.dart';
+import 'package:pfs_agent/pages/Splash.dart';
 import 'package:pfs_agent/pages/login.dart';
 
 
@@ -17,7 +18,7 @@ class MyApp extends StatelessWidget{
     return MaterialApp(
 
       debugShowCheckedModeBanner: false,
-      home: LoginPage(),
+      home: Splash(),
     );
   }
 
