@@ -1,16 +1,17 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:pfs_agent/layouts/Colors.dart';
-import 'package:pfs_agent/pages/Chats.dart';
 import 'package:pfs_agent/pages/MyClients.dart';
 import 'package:pfs_agent/pages/dashboardpage.dart';
+import 'package:pfs_agent/pages/ProfilePage.dart';
 
-import 'dashboardpage2.dart'; // import your color file
+
 
 class Home extends StatefulWidget {
   @override
   HomeState createState() => HomeState();
 }
+
 class HomeState extends State<Home> {
   int _selectedIndex = 0;
   late PageController _pageController;
@@ -27,11 +28,7 @@ class HomeState extends State<Home> {
     super.dispose();
   }
 
-  final List<Widget> _pages = [
-    DashboardPage(),
-    MyClients(),
-    Chats(),
-  ];
+  final List<Widget> _pages = [DashboardPage(), MyClients(), ProfilePage()];
 
   void _onItemTapped(int index) {
     setState(() {
@@ -59,13 +56,13 @@ class HomeState extends State<Home> {
         body: PageView(
           controller: _pageController,
           // Use proper page physics so fast swipes go to next page instead of snapping back
-          physics: const PageScrollPhysics(), // or just remove this line (PageView uses PageScrollPhysics by default)
+          physics:
+              const PageScrollPhysics(), // or just remove this line (PageView uses PageScrollPhysics by default)
           onPageChanged: (index) {
             setState(() => _selectedIndex = index);
           },
           children: _pages,
         ),
-
 
         bottomNavigationBar: BottomNavigationBar(
           currentIndex: _selectedIndex,
@@ -85,8 +82,8 @@ class HomeState extends State<Home> {
               label: 'My Clients',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.chat_bubble_outline),
-              label: 'Chats',
+              icon: Icon(Icons.person_outline),
+              label: 'Profile',
             ),
           ],
         ),
@@ -94,4 +91,3 @@ class HomeState extends State<Home> {
     );
   }
 }
-

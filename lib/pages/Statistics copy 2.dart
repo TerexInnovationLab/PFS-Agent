@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:pfs_agent/layouts/Colors.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'TargetsService.dart';
 import 'database/digital_registration_db.dart';
@@ -20,33 +23,16 @@ class _StatisticsState extends State<Statistics> {
   // ================== TARGETS / SUMMARY ==================
   String _category = "---";
   int _commission = 0;
-
-  // ✅ transport amounts split into MID + END
-  int _transportMidAmount = 0;
-  int _transportEndAmount = 0;
-
-  // ✅ Generated under progress bar MUST come from: transport_incentive.accumulated.month_end
-  int _accumulated = 0;
-
-  // ✅ Target under progress bar
+  int _transportIncentive = 0;
   int _targetAmount = 0;
 
-  // ✅ percentage MUST come from TargetsService payload ONLY
+  // Keep for compatibility (if used elsewhere)
   int percenta = 0;
 
-  // ✅ show "--" while fetching/initial
-  bool _percentLoaded = false;
-
+  double _progressPercentage = 0.0;
+  int _accumulated = 0;
   String _monthYear = "";
-
-  // ✅ Total generated MUST come from TargetsService payload: total_amount (NO calculation)
   int total = 0;
-
-  // ✅ UI listens to this only; it gets updated ONLY from TargetsService payload
-  final ValueNotifier<int?> _progressPct = ValueNotifier<int?>(null);
-
-  // ✅ prevent overlapping targets updates (keeps category/target/% in sync)
-  bool _targetsUpdateInProgress = false;
 
   // ================== CLIENT STATS ==================
   int totalclients = 0;
@@ -56,6 +42,35 @@ class _StatisticsState extends State<Statistics> {
   int bounceclients = 0;
 
   late Future<Map<String, int>> _statsFuture;
+
+  // ===================== API ENDPOINTS =====================
+  static const String _registrationsUrl =
+      "https://monophyletic-beckham-superstoically.ngrok-free.dev/pinnacle/public/api/registrations";
+
+  // ===================== ✅ STABLE PROGRESS (SAME AS DASHBOARD) =====================
+  static const String _kLastProgressPct = "last_progress_percent";
+  static const String _kLastProgressUpdatedAt = "last_progress_updated_at";
+
+  // The bar updates via this notifier, so the whole page won't rebuild.
+  final ValueNotifier<int?> _progressPct = ValueNotifier<int?>(null);
+
+  // In-memory cache to avoid initial "0%" flash before prefs loads.
+  static int? _progressCacheInMemory;
+
+  // lock to avoid overlapping requests
+  bool _progressRequestRunning = false;
+
+  // refresh progress every 4 seconds while page is in view
+  Timer? _progressTimer;
+
+  // ✅ approved loan tracking (optional: used for debugging/extra UI later)
+  int _totalApprovedLoanAmount = 0;
+
+  // ================= TOKEN =================
+  Future<String?> _getToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString("token");
+  }
 
   // ================= SAFE INT PARSER =================
   int _toInt(dynamic v) {
@@ -71,29 +86,19 @@ class _StatisticsState extends State<Statistics> {
     return 0;
   }
 
-  // ================= PERCENT PARSER (from TargetsService payload) =================
-  int _toPercentInt(dynamic v) {
-    if (v == null) return 0;
+  // ================= PERCENT HELPER =================
+  int _calcPercent({required int value, required int target}) {
+    if (target <= 0) return 0;
+    final pct = ((value / target) * 100).round();
+    return pct.clamp(0, 9999);
+  }
 
-    if (v is int) return v.clamp(0, 9999);
-
-    if (v is double || v is num) {
-      final d = (v as num).toDouble();
-      // supports 0.34 => 34%
-      if (d > 0 && d <= 1) return (d * 100).round().clamp(0, 9999);
-      return d.round().clamp(0, 9999);
+  int _stableProgressValue(int pct) {
+    // If API returns 0 temporarily, keep last known good value
+    if (pct <= 0 && (_progressCacheInMemory ?? 0) > 0) {
+      return _progressCacheInMemory!;
     }
-
-    if (v is String) {
-      final s = v.trim().replaceAll('%', '');
-      if (s.isEmpty) return 0;
-      final d = double.tryParse(s);
-      if (d == null) return 0;
-      if (d > 0 && d <= 1) return (d * 100).round().clamp(0, 9999);
-      return d.round().clamp(0, 9999);
-    }
-
-    return 0;
+    return pct;
   }
 
   // ================= PROGRESS BAR COLOR RULES =================
@@ -103,11 +108,160 @@ class _StatisticsState extends State<Statistics> {
     return Colors.green;
   }
 
+  // =================✅ PERSIST/RESTORE PROGRESS (STABLE) =================
+  Future<void> _loadPersistedProgress() async {
+    // show in-memory immediately if available (prevents 0 flicker)
+    if (_progressCacheInMemory != null) {
+      _progressPct.value = _progressCacheInMemory;
+      percenta = _progressCacheInMemory!;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getInt(_kLastProgressPct);
+    if (saved == null) return;
+
+    _progressCacheInMemory = saved;
+    _progressPct.value = saved;
+    percenta = saved;
+  }
+
+  Future<void> _persistProgress(int pct) async {
+    final effectivePct = _stableProgressValue(pct);
+    _progressCacheInMemory = effectivePct;
+
+    // update bar without rebuilding the entire page
+    _progressPct.value = effectivePct;
+    percenta = effectivePct;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kLastProgressPct, effectivePct);
+    await prefs.setString(
+      _kLastProgressUpdatedAt,
+      DateTime.now().toIso8601String(),
+    );
+  }
+
+  // ================= NEW LOGIC: APPROVED SUM ONLY =================
+  // ✅ do NOT reset UI to 0/fallback on errors/timeouts/token missing.
+  // ✅ only update UI when we successfully compute a percent.
+  Future<void> _refreshLoanProgressFromRegistrations() async {
+    if (_progressRequestRunning) return;
+    _progressRequestRunning = true;
+
+    try {
+      if (_targetAmount <= 0) return;
+
+      final token = await _getToken();
+      if (token == null || token.isEmpty) {
+        // keep last displayed percent
+        return;
+      }
+
+      final res = await http
+          .get(
+            Uri.parse(_registrationsUrl),
+            headers: {
+              "Accept": "application/json",
+              "Authorization": "Bearer $token",
+            },
+          )
+          .timeout(const Duration(seconds: 20));
+
+      if (res.statusCode != 200) {
+        // keep last displayed percent
+        return;
+      }
+
+      final decoded = jsonDecode(res.body);
+      final regsRaw =
+          (decoded is Map<String, dynamic>) ? decoded["registrations"] : null;
+      final List regs = (regsRaw is List) ? regsRaw : [];
+
+      int sumApprovedAmounts = 0;
+
+      for (final r in regs) {
+        if (r is! Map) continue;
+        final status = (r["status"] ?? "").toString().toLowerCase().trim();
+        if (status == "approved") {
+          sumApprovedAmounts += _toInt(r["total_amount_approved"]);
+        }
+      }
+
+      final pct =
+          _calcPercent(value: sumApprovedAmounts, target: _targetAmount);
+      final stablePct = _stableProgressValue(pct);
+
+      // update only if changed (reduces redraw + flicker)
+      final current = _progressPct.value;
+      if (current == stablePct) {
+        _totalApprovedLoanAmount = sumApprovedAmounts;
+        return;
+      }
+
+      _totalApprovedLoanAmount = sumApprovedAmounts;
+
+      // persist + update bar (no setState needed)
+      // ignore: discarded_futures
+      _persistProgress(stablePct);
+    } on TimeoutException {
+      return;
+    } catch (_) {
+      return;
+    } finally {
+      _progressRequestRunning = false;
+    }
+  }
+
   // ================= TARGETS SERVICE =================
   void Service() {
     _targetsService = TargetsService(
-      onDataReceived: (data) {
-        _handleTargetsPayload(data);
+      onDataReceived: (data) async {
+        if (!mounted) return;
+
+        int fallbackPercent = 0;
+
+        setState(() {
+          _category = data['category']?.toString() ?? "N/A";
+          _commission = _toInt(data['commission']);
+          _monthYear = "${data['month']} ${data['year']}".toUpperCase();
+
+          final transport = data['transport_incentive'];
+          if (transport is Map) {
+            _targetAmount = _toInt(transport['target']);
+
+            final midMonth = transport['mid_month'];
+            if (midMonth is Map) {
+              _transportIncentive = _toInt(midMonth['amount']);
+              _progressPercentage = (midMonth['percentage'] ?? 0.0).toDouble();
+            }
+
+            final acc = transport['accumulated'];
+            if (acc is Map) {
+              _accumulated = _toInt(acc['mid_month']);
+              if (_accumulated == 0) {
+                _accumulated = _toInt(acc['month_end']);
+              }
+            } else {
+              _accumulated = _toInt(acc);
+            }
+
+            fallbackPercent =
+                _calcPercent(value: _accumulated, target: _targetAmount);
+          }
+
+          total = _transportIncentive + _commission;
+        });
+
+        // apply fallback ONLY if we have no saved/current value yet
+        final cur = _progressPct.value;
+        if ((cur == null || cur <= 0) && fallbackPercent > 0) {
+          // ignore: discarded_futures
+          _persistProgress(fallbackPercent);
+        }
+
+        // registrations overrides after fetch (no flicker, no reset on errors)
+        // ignore: discarded_futures
+        _refreshLoanProgressFromRegistrations();
       },
       onError: (error) {
         debugPrint("Update Error: $error");
@@ -115,125 +269,6 @@ class _StatisticsState extends State<Statistics> {
     );
 
     _targetsService.startPolling();
-  }
-
-  // ✅ Updates ONLY from targets service payload.
-  // ✅ Requirements:
-  // - total generated card -> data['total_amount']
-  // - Generated: K... below progressbar -> data['transport_incentive']['accumulated']['month_end']
-  //
-  // ✅ Backward compatibility:
-  // - If accumulated is not a map (API sends number), use it.
-  // - If month_end missing, fall back to mid_month then raw accumulated.
-  Future<void> _handleTargetsPayload(dynamic data) async {
-    if (!mounted) return;
-    if (_targetsUpdateInProgress) return;
-    _targetsUpdateInProgress = true;
-
-    try {
-      String nextCategory = _category;
-      int nextCommission = _commission;
-
-      int nextMid = _transportMidAmount;
-      int nextEnd = _transportEndAmount;
-
-      int nextTargetAmount = _targetAmount;
-      int nextAccumulated = _accumulated;
-
-      String nextMonthYear = _monthYear;
-      int nextPercent = percenta;
-
-      int nextTotal = total;
-
-      if (data is Map) {
-        nextCategory = data['category']?.toString() ?? "N/A";
-        nextCommission = _toInt(data['commission']);
-        nextMonthYear = "${data['month']} ${data['year']}".toUpperCase();
-
-        // ✅ total generated from TargetsService: total_amount
-        nextTotal =
-            _toInt(data['total_amount'] ?? data['total'] ?? data['totalGenerated']);
-
-        // ✅ transport incentive must be from transport_incentive (per your requirement)
-        final transport = data['transport_incentive'];
-        if (transport is Map) {
-          // target
-          nextTargetAmount = _toInt(transport['target']);
-
-          // ✅ accumulated MUST use month_end
-          final acc = transport['accumulated'];
-          if (acc is Map) {
-            // primary requirement
-            nextAccumulated = _toInt(acc['month_end']);
-
-            // fallbacks (safe)
-            if (nextAccumulated == 0) {
-              nextAccumulated = _toInt(acc['mid_month']);
-            }
-            if (nextAccumulated == 0) {
-              nextAccumulated = _toInt(acc['value'] ?? acc['amount']);
-            }
-          } else {
-            // if API ever returns a number directly
-            nextAccumulated = _toInt(acc);
-          }
-
-          // MID amount
-          final midMonth = transport['mid_month'];
-          if (midMonth is Map) {
-            nextMid = _toInt(midMonth['amount']);
-          } else {
-            nextMid = _toInt(transport['mid_amount'] ?? transport['mid']);
-          }
-
-          // END amount (support several possible keys)
-          final endMonth = transport['end_month'] ??
-              transport['end'] ??
-              transport['month_end'] ??
-              transport['end_month_amount'];
-
-          if (endMonth is Map) {
-            nextEnd = _toInt(endMonth['amount']);
-          } else {
-            nextEnd = _toInt(endMonth);
-          }
-
-          // percent (service-only)
-          dynamic percentRaw = transport['percent'] ?? transport['percentage'];
-          if (percentRaw == null && midMonth is Map) {
-            percentRaw = midMonth['percent'] ?? midMonth['percentage'];
-          }
-          nextPercent = _toPercentInt(percentRaw);
-        }
-      }
-
-      if (!mounted) return;
-
-      setState(() {
-        _category = nextCategory;
-        _commission = nextCommission;
-
-        _transportMidAmount = nextMid;
-        _transportEndAmount = nextEnd;
-
-        // ✅ Generated under bar (month_end)
-        _accumulated = nextAccumulated;
-
-        _targetAmount = nextTargetAmount;
-
-        // ✅ Total generated from service ONLY
-        total = nextTotal;
-
-        _monthYear = nextMonthYear;
-
-        percenta = nextPercent;
-        _percentLoaded = true;
-      });
-
-      _progressPct.value = nextPercent;
-    } finally {
-      _targetsUpdateInProgress = false;
-    }
   }
 
   // ================= COMBINED STATS =================
@@ -300,34 +335,33 @@ class _StatisticsState extends State<Statistics> {
 
     _statsFuture = _getCombinedStats();
 
-    // show "--" until service loads
-    _progressPct.value = null;
+    // ✅ load cached progress BEFORE starting services/timers
+    _loadPersistedProgress();
 
     Service();
+
+    // ✅ refresh progress every 4 seconds while page is in view
+    _progressTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      _refreshLoanProgressFromRegistrations();
+    });
   }
 
   @override
   void dispose() {
-    _progressPct.dispose();
-    super.dispose();
-  }
+    _progressTimer?.cancel();
 
-  // ================= MONEY FORMATTER =================
-  // "1200000" -> "1,200,000"
-  String _formatMoneyInt(int amount) {
-    final s = amount.abs().toString();
-    final buf = StringBuffer();
-    for (int i = 0; i < s.length; i++) {
-      final idxFromEnd = s.length - i;
-      buf.write(s[i]);
-      if (idxFromEnd > 1 && idxFromEnd % 3 == 1) buf.write(',');
-    }
-    final out = buf.toString();
-    return amount < 0 ? "-$out" : out;
+    // prevent notifier leaks
+    _progressPct.dispose();
+
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final double targetProgress = (_targetAmount > 0)
+        ? (_accumulated / _targetAmount).clamp(0.0, 1.0)
+        : 0.0;
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -335,7 +369,7 @@ class _StatisticsState extends State<Statistics> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildHeader(),
+              _buildHeader(targetProgress),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
                 child: Column(
@@ -357,7 +391,7 @@ class _StatisticsState extends State<Statistics> {
   }
 
   // ================= HEADER =================
-  Widget _buildHeader() {
+  Widget _buildHeader(double targetProgress) {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
       decoration: BoxDecoration(
@@ -403,8 +437,7 @@ class _StatisticsState extends State<Statistics> {
               ),
               const Spacer(),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(20),
@@ -439,7 +472,7 @@ class _StatisticsState extends State<Statistics> {
           ),
           const SizedBox(height: 8),
 
-          // ✅ progress comes ONLY from targets service
+          // ✅ same stable progress logic as dashboard
           _buildTargetProgressBarStable(),
 
           const SizedBox(height: 6),
@@ -447,7 +480,7 @@ class _StatisticsState extends State<Statistics> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                "Generated: K${_formatMoneyInt(_accumulated)}",
+                "Generated: K${_formatMoney(_accumulated.toDouble())}",
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 11,
@@ -455,7 +488,7 @@ class _StatisticsState extends State<Statistics> {
                 ),
               ),
               Text(
-                "Target: K${_formatMoneyInt(_targetAmount)}",
+                "Target: K${_formatMoney(_targetAmount.toDouble())}",
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 11,
@@ -469,21 +502,16 @@ class _StatisticsState extends State<Statistics> {
     );
   }
 
-  // ✅ STABLE progress bar: listens to _progressPct (service-only)
+  // ✅ STABLE + SMOOTH progress bar (does not reset on parent rebuilds)
   Widget _buildTargetProgressBarStable() {
     return ValueListenableBuilder<int?>(
       valueListenable: _progressPct,
       builder: (context, pctOrNull, _) {
-        final bool loading =
-            pctOrNull == null || !_percentLoaded || _targetAmount <= 0;
+        final bool loading = pctOrNull == null;
 
         final int pct = loading ? 0 : pctOrNull!.clamp(0, 9999);
-        final double factor =
-            loading ? 0.0 : (pct / 100.0).clamp(0.0, 1.0);
-
-        final Color barColor = loading
-            ? Colors.white.withOpacity(0.35)
-            : _progressColorForPercent(pct);
+        final double factor = (pct / 100.0).clamp(0.0, 1.0);
+        final Color barColor = _progressColorForPercent(pct);
 
         return Stack(
           alignment: Alignment.centerLeft,
@@ -495,6 +523,8 @@ class _StatisticsState extends State<Statistics> {
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
+
+            // animates from previous factor -> new factor
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: AnimatedFractionallySizedBox(
@@ -508,10 +538,11 @@ class _StatisticsState extends State<Statistics> {
                 ),
               ),
             ),
+
             Positioned.fill(
               child: Center(
                 child: Text(
-                  loading ? "--" : "$pct%",
+                  loading ? "..." : "$pct%",
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -545,16 +576,15 @@ class _StatisticsState extends State<Statistics> {
             Expanded(
               child: _statCard(
                 title: "Commission earned",
-                value: "K${_formatMoneyInt(_commission)}",
+                value: "K${_formatMoney(_commission.toDouble())}",
                 icon: Icons.payments_outlined,
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: _transportIncentiveCardUniform(
+              child: _statCard(
                 title: "Transport incentive",
-                midAmount: _transportMidAmount,
-                endAmount: _transportEndAmount,
+                value: "K${_formatMoney(_transportIncentive.toDouble())}",
                 icon: Icons.directions_bus_filled_outlined,
               ),
             ),
@@ -566,7 +596,7 @@ class _StatisticsState extends State<Statistics> {
             width: MediaQuery.of(context).size.width * 0.5 - 8,
             child: _statCard(
               title: "Total generated",
-              value: "K${_formatMoneyInt(total)}",
+              value: "K${_formatMoney(total.toDouble())}",
               icon: Icons.trending_up_rounded,
               accentColor: AppColors.secondary,
             ),
@@ -631,81 +661,6 @@ class _StatisticsState extends State<Statistics> {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 14,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _transportIncentiveCardUniform({
-    required String title,
-    required int midAmount,
-    required int endAmount,
-    required IconData icon,
-    Color? accentColor,
-  }) {
-    final Color accent = accentColor ?? AppColors.primary;
-    final String midFmt = _formatMoneyInt(midAmount);
-    final String endFmt = _formatMoneyInt(endAmount);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      decoration: BoxDecoration(
-        color: AppColors.cardBackground,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: accent.withOpacity(0.08)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            height: 30,
-            width: 30,
-            decoration: BoxDecoration(
-              color: accent.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, size: 18, color: accent),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            "Mid: K$midFmt",
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            "End: K$endFmt",
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 12,
               fontWeight: FontWeight.w700,
               color: AppColors.textPrimary,
             ),
@@ -809,11 +764,9 @@ class _StatisticsState extends State<Statistics> {
 
   // ================= EARNINGS CHART =================
   Widget _buildEarningsChartCard() {
-    final transportTotal = _transportMidAmount + _transportEndAmount;
-
     final data = [
       _ChartItem("Commission", _commission.toDouble(), AppColors.primary),
-      _ChartItem("Transport", transportTotal.toDouble(), AppColors.secondary),
+      _ChartItem("Transport", _transportIncentive.toDouble(), AppColors.secondary),
       _ChartItem("Total", total.toDouble(), AppColors.info),
     ];
 
@@ -1009,6 +962,16 @@ class _StatisticsState extends State<Statistics> {
         ),
       ],
     );
+  }
+
+  // ================= HELPERS =================
+  static String _formatMoney(double value) {
+    return value
+        .toStringAsFixed(0)
+        .replaceAllMapped(
+          RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+          (Match m) => "${m[1]},",
+        );
   }
 }
 

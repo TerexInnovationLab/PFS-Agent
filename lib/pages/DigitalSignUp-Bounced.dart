@@ -20,24 +20,41 @@ import 'package:path_provider/path_provider.dart';
 import 'package:signature/signature.dart';
 import 'Home.dart';
 
-class DigitalSignUp extends StatefulWidget {
+class DigitalSignUpBounced extends StatefulWidget {
   final Map<String, dynamic>? draftData;
-  final int? localId; // id in digital_registrations table
+  
 
-  const DigitalSignUp({Key? key, this.draftData, this.localId})
-    : super(key: key);
+  // ✅ NEW: data passed from DigitalClientPreview
+  final Map<String, dynamic>? clientPreviewData;
+
+  // ✅ NEW: server/client id to be used in URL: /client/{id}
+  final String? clientId;
+
+
+  
+
+  const DigitalSignUpBounced({
+    Key? key,
+    this.draftData,
+    this.clientPreviewData,
+    this.clientId,
+  }) : super(key: key);
 
   @override
-  DigitalSignUpState createState() => DigitalSignUpState();
+  DigitalSignUpBouncedState createState() => DigitalSignUpBouncedState();
 }
 
 // Uniform vertical gap used between form fields on this page.
 const double _digitalSignUpFieldGap = 20.0;
 
-class DigitalSignUpState extends State<DigitalSignUp> {
+class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
   //this is for the database
   int? _localId; // ID of the record in SQLite
   bool _submittedToServer = false;
+
+ // ✅ NEW: store preview/server client id in state too (optional, but useful)
+  String? _clientIdFromPreview;
+
 
   // --- Signature capture state ---
   late final SignatureController _signatureController;
@@ -192,7 +209,13 @@ class DigitalSignUpState extends State<DigitalSignUp> {
   String? customerPhoto;
   String? self;
 
-  final String url = ApiConfig.baseUrl + '/client';
+  // compute id and url at runtime (avoid using instance members in field initializers)
+  String? get id => _clientIdFromPreview ?? widget.clientId;
+
+  String get url {
+    final idPart = id ?? '';
+    return ApiConfig.baseUrl + '/client/$idPart';
+  }
 
   Future<void> pickFile(String which) async {
     final result = await FilePicker.platform.pickFiles();
@@ -275,7 +298,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
     if (data is Map) {
       if (data['id'] != null) return data['id'].toString();
       if (data['client_id'] != null) return data['client_id'].toString();
-      if (data['created_id'] != null) return data['created_id'].toString();
+      if (data['client_id'] != null) return data['created_id'].toString();
       if (data['data'] is Map && data['data']['id'] != null)
         return data['data']['id'].toString();
     }
@@ -931,7 +954,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
 
     // ✅ Only load when an explicit draft is passed (from MyClients)
     if (widget.draftData != null) {
-      _localId = widget.localId;
+      
       _loadFromData(widget.draftData!);
     }
     // no else: opening DigitalSignUp() -> always blank form

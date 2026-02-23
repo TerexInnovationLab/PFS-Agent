@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
-import 'package:pfs_agent/pages/reset_password.dart';
+import 'package:pfs_agent/pages/OTPResetCodePage.dart';
 
 import '../layouts/Colors.dart';
 
@@ -39,26 +39,20 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     });
 
     try {
-      final response = await http
-          .post(
-            Uri.parse(
-              "https://monophyletic-beckham-superstoically.ngrok-free.dev/pinnacle/public/api/forgot-password",
-            ),
-            headers: {
-              "Content-Type": "application/json",
-              "Accept": "application/json",
-            },
-            body: jsonEncode({"email": email}),
-          )
-          .timeout(const Duration(seconds: 15));
-
-      print("Forgot password response: ${response.statusCode}");
-      print("Response body: ${response.body}");
+      final response = await http.post(
+        Uri.parse(
+          "https://monophyletic-beckham-superstoically.ngrok-free.dev/pinnacle/public/api/forgot-password",
+        ),
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
+        body: jsonEncode({"email": email}),
+      );
 
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200 && data["status"] == true) {
-        // ✅ Success → show alert then navigate to ResetPasswordPage
         _showAlert(
           icon: Icons.check_circle,
           color: AppColors.success,
@@ -73,17 +67,17 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
         );
       }
     } catch (e) {
-      print("Forgot password error: $e"); // debug
       _showAlert(
         icon: Icons.wifi_off,
         color: AppColors.danger,
         message: "Network error. Please try again.",
       );
     } finally {
-      setState(() => isLoading = false);
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
+  // ================= ALERT =================
   void _showAlert({
     required IconData icon,
     required Color color,
@@ -93,27 +87,26 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) {
-        Future.delayed(const Duration(seconds: 2), () {
-          Navigator.of(context).pop();
+      builder: (dialogContext) {
+        if (email != null) {
+          Future.delayed(const Duration(seconds: 2), () {
+            Navigator.of(dialogContext).pop();
 
-          if (email != null) {
             Navigator.pushReplacement(
-              context,
+              dialogContext,
               MaterialPageRoute(
-                builder: (_) => ResetPasswordPage(email: email),
+                builder: (_) => OTPResetCodePage(email: email),
               ),
             );
-          }
-        });
+          });
+        }
 
         return AlertDialog(
           backgroundColor: AppColors.cardBackground,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(18),
           ),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -125,7 +118,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
               const SizedBox(height: 16),
               Text(
                 message,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 15,
                   color: AppColors.textPrimary,
                   fontWeight: FontWeight.w500,
@@ -139,6 +132,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     );
   }
 
+  // ================= UI =================
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
@@ -203,8 +197,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                     child: Container(
                       decoration: BoxDecoration(
                         color: AppColors.background,
-                        borderRadius:
-                            const BorderRadius.vertical(top: Radius.circular(24)),
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
                       ),
                       child: SingleChildScrollView(
                         padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
@@ -233,8 +226,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                                         height: 32,
                                         width: 32,
                                         decoration: BoxDecoration(
-                                          color:
-                                              AppColors.primary.withOpacity(0.12),
+                                          color: AppColors.primary.withOpacity(0.12),
                                           borderRadius: BorderRadius.circular(10),
                                         ),
                                         child: const Icon(
@@ -269,13 +261,11 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                                       errorText: errorText,
                                       filled: true,
                                       fillColor: AppColors.background,
-                                      contentPadding: const EdgeInsets.symmetric(
-                                          horizontal: 12, vertical: 10),
+                                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                       enabledBorder: OutlineInputBorder(
                                         borderRadius: BorderRadius.circular(12),
                                         borderSide: BorderSide(
-                                          color: AppColors.textSecondary
-                                              .withOpacity(0.18),
+                                          color: AppColors.textSecondary.withOpacity(0.18),
                                           width: 1,
                                         ),
                                       ),
@@ -311,8 +301,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                                         backgroundColor: AppColors.primary,
                                         foregroundColor: Colors.white,
                                         elevation: 0,
-                                        padding: const EdgeInsets.symmetric(
-                                            vertical: 14),
+                                        padding: const EdgeInsets.symmetric(vertical: 14),
                                         shape: RoundedRectangleBorder(
                                           borderRadius: BorderRadius.circular(16),
                                         ),

@@ -9,6 +9,7 @@ class DigitalRegistration {
   int? id;
   String status; // "draft" or "pending" (and later maybe "approved", "rejected", etc.)
   Map<String, dynamic> data;
+  String? reason; // bounce reason
   DateTime createdAt;
   DateTime updatedAt;
 
@@ -16,6 +17,7 @@ class DigitalRegistration {
     this.id,
     required this.status,
     required this.data,
+    this.reason,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -25,6 +27,7 @@ class DigitalRegistration {
       'id': id,
       'status': status,
       'data': jsonEncode(data),
+      'reason': reason,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
     };
@@ -35,6 +38,7 @@ class DigitalRegistration {
       id: map['id'] as int?,
       status: map['status'] as String,
       data: jsonDecode(map['data'] as String) as Map<String, dynamic>,
+      reason: map['reason'] as String?,
       createdAt: DateTime.parse(map['created_at'] as String),
       updatedAt: DateTime.parse(map['updated_at'] as String),
     );
@@ -47,7 +51,7 @@ class DigitalRegistrationDb {
   static final DigitalRegistrationDb instance = DigitalRegistrationDb._();
 
   static const _dbName = 'pinnacle_registrations.db';
-  static const _dbVersion = 1;
+  static const _dbVersion = 2;
   static const _table = 'digital_registrations';
 
   Database? _db;
@@ -71,10 +75,16 @@ class DigitalRegistrationDb {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             status TEXT NOT NULL,
             data TEXT NOT NULL,
+            reason TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
           )
         ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('ALTER TABLE $_table ADD COLUMN reason TEXT');
+        }
       },
     );
   }
@@ -123,6 +133,19 @@ class DigitalRegistrationDb {
       _table,
       {
         'status': status,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> updateReason(int id, String reason) async {
+    final db = await database;
+    await db.update(
+      _table,
+      {
+        'reason': reason,
         'updated_at': DateTime.now().toIso8601String(),
       },
       where: 'id = ?',

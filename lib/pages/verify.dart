@@ -1,126 +1,243 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 
 import '../layouts/Colors.dart';
-import 'Home.dart';
+import '../config/api_config.dart';
 import 'login.dart';
+import 'package:pfs_agent/utils/user_friendly_errors.dart';
 
 class VerifyPage extends StatefulWidget {
-  const VerifyPage({super.key});
+  final String email;
+
+  const VerifyPage({
+    super.key,
+    required this.email,
+  });
 
   @override
   State<VerifyPage> createState() => _VerifyPageState();
 }
 
 class _VerifyPageState extends State<VerifyPage> {
-  // 🔐 Hardcoded verification code (4 digits)
-  final String verificationCode = "1234";
-
-  // We only need 4 boxes, so 4 controllers & focus nodes
+  // ✅ 6 OTP boxes
   final List<TextEditingController> controllers =
-  List.generate(4, (_) => TextEditingController());
-  final List<FocusNode> focusNodes = List.generate(4, (_) => FocusNode());
+      List.generate(6, (_) => TextEditingController());
+  final List<FocusNode> focusNodes =
+      List.generate(6, (_) => FocusNode());
 
   bool canResend = false;
-  int countdown = 30;
+  bool isVerifying = false;
+  bool isResending = false;
+
+  int countdown = 120; // ✅ 2 minutes
   Timer? timer;
 
-  // Single background image (same style as login/dashboard)
   final String _backgroundImage = 'assets/images/back.jpeg';
 
   @override
   void initState() {
     super.initState();
-    _startCountdown();
+    _startCountdown(); // first OTP already sent
   }
 
+  // ================= FORMAT TIMER TEXT =================
+  String _formatResendTime(int seconds) {
+    if (seconds >= 60) {
+      final minutes = seconds ~/ 60;
+      final secs = seconds % 60;
+      return '${minutes.toString().padLeft(2, '0')}:'
+          '${secs.toString().padLeft(2, '0')} min';
+    } else {
+      return '${seconds.toString().padLeft(2, '0')} sec';
+    }
+  }
+
+  // ================= START COUNTDOWN =================
   void _startCountdown() {
+    timer?.cancel();
+
     setState(() {
       canResend = false;
-      countdown = 30;
+      countdown = 120;
     });
 
-    timer?.cancel();
     timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return;
+
       if (countdown > 0) {
-        setState(() {
-          countdown--;
-        });
+        setState(() => countdown--);
       } else {
-        setState(() {
-          canResend = true;
-        });
+        setState(() => canResend = true);
         t.cancel();
       }
     });
   }
 
-  void _checkCode() {
-    String enteredCode = controllers.map((c) => c.text).join();
+  // ================= RESEND OTP USING API =================
+  Future<void> _resendOtp() async {
+    if (!canResend || isResending) return;
 
-    if (enteredCode.isEmpty) {
-      _showAlert(
-        icon: Icons.warning_amber_rounded,
-        color: AppColors.warning,
-        message:
-        "Verification code can't be empty.\nPlease enter the 4-digit code.",
+    // ✅ Show loader immediately
+    setState(() => isResending = true);
+
+    try {
+      final response = await http.post(
+        Uri.parse("${ApiConfig.baseUrl}/resend-otp"),
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
+        body: jsonEncode({
+          "email": widget.email,
+        }),
       );
-      return;
-    }
 
-    if (enteredCode.length < 4) {
+      // ✅ Only start countdown AFTER backend success
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        _startCountdown();
+      } else {
+        Map<String, dynamic> data = {};
+        try {
+          final decoded = jsonDecode(response.body);
+          if (decoded is Map<String, dynamic>) {
+            data = decoded;
+          }
+        } catch (_) {
+          // ignore JSON parse errors, handle below
+        }
+
+        // ❌ Backend failed → allow resend again
+        setState(() => canResend = true);
+
+        _showAlert(
+          icon: Icons.error_outline,
+          color: AppColors.danger,
+          message: friendlyErrorFromResponse(
+            statusCode: response.statusCode,
+            body: response.body,
+            messageOverride: data["message"]?.toString(),
+          ),
+        );
+      }
+    } catch (e) {
+      // ❌ Network error → allow resend again
+      setState(() => canResend = true);
+
       _showAlert(
-        icon: Icons.warning_amber_rounded,
-        color: AppColors.warning,
-        message: "Verification code must be 4 digits.",
+        icon: Icons.error_outline,
+        color: AppColors.danger,
+        message: friendlyErrorFromException(e),
       );
-      return;
+    } finally {
+      if (mounted) setState(() => isResending = false);
     }
-
-    bool isCorrect = enteredCode == verificationCode;
-
-    _showAlert(
-      icon: isCorrect ? Icons.check_circle : Icons.cancel,
-      color: isCorrect ? AppColors.success : AppColors.danger,
-      message:
-      isCorrect ? "Verification successful." : "Incorrect verification code.",
-      clearFieldsOnClose: !isCorrect,
-      navigateToDashboard: isCorrect,
-    );
   }
 
+  // ================= VERIFY OTP USING API =================
+  Future<void> _checkCode() async {
+    String enteredCode = controllers.map((c) => c.text).join();
+
+    if (enteredCode.isEmpty || enteredCode.length < 6) {
+      _showAlert(
+        icon: Icons.warning_amber_rounded,
+        color: AppColors.warning,
+        message: "Please enter the 6-digit verification code.",
+      );
+      return;
+    }
+
+    setState(() => isVerifying = true);
+
+    try {
+      final response = await http.post(
+        Uri.parse("${ApiConfig.baseUrl}/verify-email"),
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
+        body: jsonEncode({
+          "email": widget.email,
+          "otp": int.tryParse(enteredCode),
+        }),
+      );
+
+      Map<String, dynamic> data = {};
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) {
+          data = decoded;
+        }
+      } catch (_) {
+        // ignore JSON parse errors, handle below
+      }
+
+      if (response.statusCode == 200) {
+        if (!mounted) return;
+
+        _showAlert(
+          icon: Icons.check_circle,
+          color: AppColors.success,
+          message:
+              "Email verified successfully. Wait for the admin to activate your account.",
+          navigateToLogin: true,
+        );
+      } else {
+        _showAlert(
+          icon: Icons.error_outline,
+          color: AppColors.danger,
+          message: friendlyErrorFromResponse(
+            statusCode: response.statusCode,
+            body: response.body,
+            messageOverride: data["message"]?.toString(),
+          ),
+          clearFieldsOnClose: true,
+        );
+      }
+    } catch (e) {
+      _showAlert(
+        icon: Icons.error_outline,
+        color: AppColors.danger,
+        message: friendlyErrorFromException(e),
+      );
+    } finally {
+      if (mounted) setState(() => isVerifying = false);
+    }
+  }
+
+  // ================= ALERT DIALOG =================
   void _showAlert({
     required IconData icon,
     required Color color,
     required String message,
-    bool autoClose = true,
     bool clearFieldsOnClose = false,
-    bool navigateToDashboard = false,
+    bool navigateToLogin = false,
   }) {
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
-        if (autoClose) {
-          Future.delayed(const Duration(seconds: 2), () {
-            if (Navigator.of(dialogContext).canPop()) {
-              Navigator.of(dialogContext).pop();
+        Future.delayed(const Duration(seconds: 2), () {
+          if (!mounted) return;
+
+          Navigator.of(dialogContext).pop();
+
+          if (clearFieldsOnClose) {
+            for (var controller in controllers) {
+              controller.clear();
             }
-            if (clearFieldsOnClose) {
-              for (var controller in controllers) {
-                controller.clear();
-              }
-              FocusScope.of(context).requestFocus(focusNodes[0]);
-            }
-            if (navigateToDashboard) {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => LoginPage()),
-              );
-            }
-          });
-        }
+            FocusScope.of(context).requestFocus(focusNodes[0]);
+          }
+
+          if (navigateToLogin) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const LoginPage()),
+            );
+          }
+        });
 
         return AlertDialog(
           backgroundColor: AppColors.cardBackground,
@@ -128,7 +245,7 @@ class _VerifyPageState extends State<VerifyPage> {
             borderRadius: BorderRadius.circular(18),
           ),
           contentPadding:
-          const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+              const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -140,8 +257,8 @@ class _VerifyPageState extends State<VerifyPage> {
               const SizedBox(height: 16),
               Text(
                 message,
-                style: TextStyle(
-                  fontSize: 16,
+                style: const TextStyle(
+                  fontSize: 15,
                   color: AppColors.textPrimary,
                   fontWeight: FontWeight.w500,
                 ),
@@ -154,54 +271,56 @@ class _VerifyPageState extends State<VerifyPage> {
     );
   }
 
-  Widget _codeBox(int index) {
-    return SizedBox(
-      width: 50,
-      child: TextField(
-        controller: controllers[index],
-        focusNode: focusNodes[index],
-        keyboardType: TextInputType.number,
-        maxLength: 1,
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          fontSize: 20,
-          fontWeight: FontWeight.w700,
-          color: AppColors.textPrimary,
-        ),
-        decoration: InputDecoration(
-          counterText: "",
-          filled: true,
-          fillColor: AppColors.cardBackground,
-          contentPadding: const EdgeInsets.symmetric(vertical: 10),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(
-              color: AppColors.textSecondary.withOpacity(0.25),
-              width: 1,
-            ),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(
-              color: AppColors.primary,
-              width: 1.6,
-            ),
-          ),
-        ),
-        inputFormatters: [
-          FilteringTextInputFormatter.digitsOnly,
-        ],
-        onChanged: (value) {
-          if (value.length == 1 && index < controllers.length - 1) {
-            FocusScope.of(context).requestFocus(focusNodes[index + 1]);
-          }
-          if (value.isEmpty && index > 0) {
-            FocusScope.of(context).requestFocus(focusNodes[index - 1]);
-          }
-        },
+  // ================= OTP BOX =================
+ Widget _codeBox(int index) {
+  return SizedBox(
+    width: 38, // ✅ smaller (was 44)
+    child: TextField(
+      controller: controllers[index],
+      focusNode: focusNodes[index],
+      keyboardType: TextInputType.number,
+      maxLength: 1,
+      textAlign: TextAlign.center,
+      style: const TextStyle(
+        fontSize: 18, // ✅ slightly smaller (was 20)
+        fontWeight: FontWeight.w700,
+        color: AppColors.textPrimary,
       ),
-    );
-  }
+      decoration: InputDecoration(
+        counterText: "",
+        filled: true,
+        fillColor: AppColors.cardBackground,
+        contentPadding: const EdgeInsets.symmetric(vertical: 8), // ✅ smaller (was 10)
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10), // ✅ slightly smaller
+          borderSide: BorderSide(
+            color: AppColors.textSecondary.withOpacity(0.25),
+            width: 1,
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(
+            color: AppColors.primary,
+            width: 1.6,
+          ),
+        ),
+      ),
+      inputFormatters: [
+        FilteringTextInputFormatter.digitsOnly,
+      ],
+      onChanged: (value) {
+        if (value.length == 1 && index < controllers.length - 1) {
+          FocusScope.of(context).requestFocus(focusNodes[index + 1]);
+        }
+        if (value.isEmpty && index > 0) {
+          FocusScope.of(context).requestFocus(focusNodes[index - 1]);
+        }
+      },
+    ),
+  );
+}
+
 
   @override
   void dispose() {
@@ -215,13 +334,14 @@ class _VerifyPageState extends State<VerifyPage> {
     super.dispose();
   }
 
+  // ================= UI =================
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (context) => const LoginPage()),
+          MaterialPageRoute(builder: (_) => const LoginPage()),
         );
         return false;
       },
@@ -232,7 +352,6 @@ class _VerifyPageState extends State<VerifyPage> {
           body: Stack(
             fit: StackFit.expand,
             children: [
-              // 🔹 Hero background image (same as login)
               Positioned(
                 left: 0,
                 right: 0,
@@ -246,7 +365,6 @@ class _VerifyPageState extends State<VerifyPage> {
                 ),
               ),
 
-              // 🔹 Dark gradient overlay
               Positioned(
                 left: 0,
                 right: 0,
@@ -255,12 +373,23 @@ class _VerifyPageState extends State<VerifyPage> {
                   height: 220,
                   decoration: const BoxDecoration(
                     gradient: LinearGradient(
-                      colors: [
-                        Color(0xE6000000),
-                        Color(0x00000000),
-                      ],
+                      colors: [Color(0xE6000000), Color(0x00000000)],
                       begin: Alignment.bottomCenter,
                       end: Alignment.topCenter,
+                    ),
+                  ),
+                ),
+              ),
+
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 16, top: 124),
+                  child: const Text(
+                    "Verify Your Registered Email",
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
                     ),
                   ),
                 ),
@@ -273,41 +402,6 @@ class _VerifyPageState extends State<VerifyPage> {
 
                     return Stack(
                       children: [
-                        // ===== HEADER: Logo + intro text =====
-                        Positioned(
-                          top: 24,
-                          left: 16,
-                          right: 16,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              SizedBox(
-                                height: 46,
-                                child: Text("")
-                              ),
-                              const SizedBox(height: 14),
-                              const Text(
-                                "Verify your identity",
-                                style: TextStyle(
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                "Enter the 4-digit code sent to your\nregistered phone number.",
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: Colors.white.withOpacity(0.9),
-                                  height: 1.4,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        // ===== MAIN CARD SECTION (bottom sheet style) =====
                         Positioned(
                           top: size.height * 0.32,
                           left: 0,
@@ -319,49 +413,26 @@ class _VerifyPageState extends State<VerifyPage> {
                               borderRadius: const BorderRadius.vertical(
                                 top: Radius.circular(24),
                               ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.12),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, -2),
-                                ),
-                              ],
                             ),
                             child: SingleChildScrollView(
                               padding:
-                              const EdgeInsets.fromLTRB(16, 20, 16, 24),
+                                  const EdgeInsets.fromLTRB(16, 20, 16, 24),
                               child: Center(
                                 child: ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxWidth: 420,
-                                  ),
+                                  constraints:
+                                      const BoxConstraints(maxWidth: 420),
                                   child: Container(
-                                    width: double.infinity,
+                                    padding: const EdgeInsets.fromLTRB(
+                                        20, 20, 20, 24),
                                     decoration: BoxDecoration(
                                       color: AppColors.cardBackground,
                                       borderRadius: BorderRadius.circular(20),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withOpacity(0.06),
-                                          blurRadius: 10,
-                                          offset: const Offset(0, 4),
-                                        ),
-                                      ],
-                                      border: Border.all(
-                                        color: AppColors.primary
-                                            .withOpacity(0.08),
-                                      ),
                                     ),
-                                    padding: const EdgeInsets.fromLTRB(
-                                        20, 20, 20, 24),
                                     child: Column(
                                       crossAxisAlignment:
-                                      CrossAxisAlignment.center,
-                                      mainAxisSize: MainAxisSize.min,
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Row(
-                                          mainAxisAlignment:
-                                          MainAxisAlignment.center,
                                           children: [
                                             Container(
                                               height: 30,
@@ -370,102 +441,116 @@ class _VerifyPageState extends State<VerifyPage> {
                                                 color: AppColors.primary
                                                     .withOpacity(0.12),
                                                 borderRadius:
-                                                BorderRadius.circular(10),
+                                                    BorderRadius.circular(10),
                                               ),
                                               child: const Icon(
-                                                Icons.sms_outlined,
+                                                Icons.lock_outline,
                                                 size: 18,
                                                 color: AppColors.primary,
                                               ),
                                             ),
                                             const SizedBox(width: 10),
-                                            const Expanded(
-                                              child: Text(
-                                                "Enter verification code",
-                                                style: TextStyle(
-                                                  fontSize: 16,
-                                                  fontWeight: FontWeight.w700,
-                                                  color:
-                                                  AppColors.textPrimary,
-                                                ),
+                                            const Text(
+                                              "Enter 6-digit code",
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w700,
+                                                color:
+                                                    AppColors.textPrimary,
                                               ),
                                             ),
                                           ],
                                         ),
-                                        const SizedBox(height: 8),
+
+                                        const SizedBox(height: 6),
+
                                         Text(
-                                          "We’ve sent a 4-digit code to your registered mobile number.",
+                                          "Enter the code that was sent to ${widget.email}",
                                           style: TextStyle(
                                             fontSize: 13,
                                             color: AppColors.textSecondary,
                                           ),
-                                          textAlign: TextAlign.center,
                                         ),
-                                        const SizedBox(height: 24),
 
-                                        // Code boxes
-                                        Row(
-                                          mainAxisAlignment:
-                                          MainAxisAlignment.center,
+                                        const SizedBox(height: 20),
+
+                                        Wrap(
+                                          alignment: WrapAlignment.center,
+                                          spacing: 10,
+                                          runSpacing: 12,
                                           children: List.generate(
-                                            4,
-                                                (i) => Padding(
-                                              padding:
-                                              const EdgeInsets.symmetric(
-                                                  horizontal: 6),
-                                              child: _codeBox(i),
-                                            ),
+                                            6,
+                                            (i) => _codeBox(i),
                                           ),
                                         ),
 
-                                        const SizedBox(height: 24),
+                                        const SizedBox(height: 20),
 
-                                        // Verify button
+                                        Align(
+                                          alignment: Alignment.centerRight,
+                                          child: TextButton(
+                                            onPressed: (canResend && !isResending)
+                                                ? _resendOtp
+                                                : null,
+                                            child: isResending
+                                                ? const SizedBox(
+                                                    width: 16,
+                                                    height: 16,
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                      color:
+                                                          AppColors.primary,
+                                                    ),
+                                                  )
+                                                : Text(
+                                                    canResend
+                                                        ? "Resend code"
+                                                        : "Resend in ${_formatResendTime(countdown)}",
+                                                    style: TextStyle(
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w500,
+                                                      color: canResend
+                                                          ? AppColors.primary
+                                                          : AppColors
+                                                              .textSecondary,
+                                                    ),
+                                                  ),
+                                          ),
+                                        ),
+
+                                        const SizedBox(height: 6),
+
                                         SizedBox(
                                           width: double.infinity,
                                           child: ElevatedButton(
-                                            onPressed: _checkCode,
+                                            onPressed: isVerifying
+                                                ? null
+                                                : _checkCode,
                                             style: ElevatedButton.styleFrom(
                                               backgroundColor:
-                                              AppColors.primary,
+                                                  AppColors.primary,
                                               foregroundColor: Colors.white,
-                                              elevation: 0,
                                               padding:
-                                              const EdgeInsets.symmetric(
-                                                vertical: 14,
-                                              ),
+                                                  const EdgeInsets.symmetric(
+                                                      vertical: 14),
                                               shape: RoundedRectangleBorder(
                                                 borderRadius:
-                                                BorderRadius.circular(16),
+                                                    BorderRadius.circular(16),
                                               ),
                                             ),
-                                            child: const Text(
-                                              "Verify",
-                                              style: TextStyle(
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-
-                                        const SizedBox(height: 16),
-
-                                        // Resend
-                                        TextButton(
-                                          onPressed:
-                                          canResend ? _startCountdown : null,
-                                          child: Text(
-                                            canResend
-                                                ? "Resend code"
-                                                : "Resend in $countdown seconds",
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w500,
-                                              color: canResend
-                                                  ? AppColors.primary
-                                                  : AppColors.textSecondary,
-                                            ),
+                                            child: isVerifying
+                                                ? const SizedBox(
+                                                    height: 20,
+                                                    width: 20,
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                      color: Colors.white,
+                                                    ),
+                                                  )
+                                                : const Text("Verify"),
                                           ),
                                         ),
                                       ],

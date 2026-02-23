@@ -2,8 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:pfs_agent/pages/DigitalSignUp-Bounced.dart';
-import '../layouts/Colors.dart';
+import '../layouts/Colors.dart'; // adjust path to your AppColors
 import 'full_image_page.dart';
 
 class DigitalClientPreview extends StatefulWidget {
@@ -32,36 +31,6 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
     } catch (_) {
       return iso.toString();
     }
-  }
-
-  /// ✅ Extract server/client id from preview payload
-  /// Supports: {id: 1}, {client_id: 1}, {data:{id:1}}, {data:{client_id:1}}
-  String? _extractClientId(Map<String, dynamic> raw) {
-    dynamic v = raw['id'] ?? raw['client_id'];
-
-    if (v == null && raw['data'] is Map<String, dynamic>) {
-      final inner = raw['data'] as Map<String, dynamic>;
-      v = inner['id'] ?? inner['client_id'];
-    }
-
-    if (v == null) return null;
-    final s = v.toString().trim();
-    return s.isEmpty ? null : s;
-  }
-
-  /// ✅ Go to DigitalSignUpBounced and pass id + data for autofill
-  void _openEditAutofill() {
-    final clientId = _extractClientId(widget.data);
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => DigitalSignUpBounced(
-          clientId: clientId, // ✅ id goes here
-          clientPreviewData: widget.data, // ✅ full map for autofill
-        ),
-      ),
-    );
   }
 
   Widget _sectionTitle(String text) {
@@ -167,6 +136,7 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
   Widget build(BuildContext context) {
     final d = widget.data;
 
+    // Read all fields from the same keys you used in _collectFormData()
     final titleValue = (d['titleValue'] ?? '').toString();
     final firstName = (d['firstName'] ?? '').toString();
     final surname = (d['surname'] ?? '').toString();
@@ -179,8 +149,6 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
 
     // Status badge
     final status = widget.status.toLowerCase();
-    final bool isBounced = status == 'bounced';
-
     Color statusColor;
     String statusLabel;
     switch (status) {
@@ -210,8 +178,6 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
         statusLabel = 'Pending';
     }
 
-    final clientId = _extractClientId(d);
-
     return Scaffold(
       appBar: AppBar(
         title: const Text(
@@ -220,16 +186,6 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
         ),
         backgroundColor: AppColors.primary,
         iconTheme: const IconThemeData(color: Colors.white),
-
-        // ✅ Edit button ONLY when status == bounced
-        actions: [
-          if (isBounced)
-            IconButton(
-              tooltip: 'Edit / Autofill',
-              onPressed: _openEditAutofill,
-              icon: const Icon(Icons.edit, color: Colors.white),
-            ),
-        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -242,33 +198,17 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
                 const Icon(Icons.person, size: 40),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        fullName.isEmpty ? 'Unknown Client' : fullName,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      if (clientId != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2.0),
-                          child: Text(
-                            'Client ID: $clientId',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey,
-                            ),
-                          ),
-                        ),
-                    ],
+                  child: Text(
+                    fullName.isEmpty ? 'Unknown Client' : fullName,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
                 Container(
                   padding:
-                      const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
+                  const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
                   decoration: BoxDecoration(
                     color: statusColor.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
@@ -298,42 +238,19 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.info_outline,
-                        color: Colors.red[700],
-                      ),
+                      Icon(Icons.info_outline, color: Colors.red[700],),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           widget.reason!.trim(),
-                          style: TextStyle(
-                            color: Colors.red[700],
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: TextStyle(color: Colors.red[700],fontWeight: FontWeight.bold,),
+                          
                         ),
                       ),
                     ],
                   ),
                 ),
               ),
-
-            // ✅ Big Edit button ONLY when status == bounced
-            if (isBounced) ...[
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: _openEditAutofill,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                  icon: const Icon(Icons.edit),
-                  label: const Text('Edit / Autofill Form'),
-                ),
-              ),
-            ],
 
             // PERSONAL INFORMATION
             _sectionTitle('Personal Information'),
@@ -425,12 +342,11 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
                     _reviewRow('Length of Service (years)', d['lengthYears']),
                     _reviewRow('Length of Service (months)', d['lengthMonths']),
                     _reviewRow(
-                      'Full Time Staff',
-                      (d['employedFullTime'] == true ||
-                              d['employedFullTime'] == 'true')
-                          ? 'Yes'
-                          : 'No',
-                    ),
+                        'Full Time Staff',
+                        (d['employedFullTime'] == true ||
+                            d['employedFullTime'] == 'true')
+                            ? 'Yes'
+                            : 'No'),
                     _reviewRow('Gross Annual Salary', d['grossAnnual']),
                     _reviewRow('Net Monthly Income', d['netMonthly']),
                     _reviewRow('Work Address', d['workAddress']),
@@ -457,21 +373,19 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
                     _reviewRow('Account Number', d['accountNumber']),
                     _reviewRow('Account Type', d['accountType']),
                     _reviewRow(
-                      'Salary Paid Into Account',
-                      (d['salaryPaidIntoAccount'] == true ||
-                              d['salaryPaidIntoAccount'] == 'true')
-                          ? 'Yes'
-                          : 'No',
-                    ),
+                        'Salary Paid Into Account',
+                        (d['salaryPaidIntoAccount'] == true ||
+                            d['salaryPaidIntoAccount'] == 'true')
+                            ? 'Yes'
+                            : 'No'),
                     _reviewRow('Usage (years)', d['accountUsageYears']),
                     _reviewRow('Usage (months)', d['accountUsageMonths']),
                     _reviewRow(
-                      'Salary transferred 3 months',
-                      (d['salaryTransferred3Months'] == true ||
-                              d['salaryTransferred3Months'] == 'true')
-                          ? 'Yes'
-                          : 'No',
-                    ),
+                        'Salary transferred 3 months',
+                        (d['salaryTransferred3Months'] == true ||
+                            d['salaryTransferred3Months'] == 'true')
+                            ? 'Yes'
+                            : 'No'),
                   ],
                 ),
               ),
@@ -491,7 +405,8 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
                     _reviewRow('Admin Fee', d['adminFee']),
                     _reviewRow('Interest', d['interest']),
                     _reviewRow('Total Collectable', d['totalCollectable']),
-                    _reviewRow('Monthly Instalment', d['monthlyInstalment']),
+                    _reviewRow(
+                        'Monthly Instalment', d['monthlyInstalment']),
                     _reviewRow(
                       'Loan Purpose',
                       d['loanPurpose'] == 'other'
@@ -514,7 +429,9 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
             _imageRow('Bank Statement', d['bankStatementPath']),
             _imageRow('Employer Letter', d['employerLetterPath']),
 
-            const SizedBox(height: 50),
+
+
+            SizedBox(height: 50,)
           ],
         ),
       ),

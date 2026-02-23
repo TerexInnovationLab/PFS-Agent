@@ -1,14 +1,15 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:pfs_agent/layouts/Colors.dart';
 import 'package:pfs_agent/pages/Home.dart';
 import 'package:pfs_agent/pages/forgot_password.dart';
-
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/api_config.dart';
-import 'Sing Up.dart';
+import 'Sign Up.dart';
+import 'package:pfs_agent/pages/verify.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -28,31 +29,129 @@ class _LoginPageState extends State<LoginPage> {
 
   final String _backgroundImage = 'assets/images/back.jpeg';
 
+  // ✅ ADD: timer to safely navigate after delay
+  Timer? _verifyNavTimer;
+
+  @override
+  void dispose() {
+    _verifyNavTimer?.cancel();
+    email.dispose();
+    password.dispose();
+    super.dispose();
+  }
+
   /// Saves user session data to SharedPreferences
   Future<void> _saveUserSession(Map<String, dynamic> responseData) async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
 
-    // 1. Save the authentication token
     await prefs.setString('token', responseData['token']);
 
-    // 2. Save the user object as a JSON string (for easy retrieval later)
-    String userJson = jsonEncode(responseData['user']);
+    final String userJson = jsonEncode(responseData['user']);
     await prefs.setString('user_data', userJson);
 
-    // 3. Save the "Keep me logged in" preference
     await prefs.setBool('keep_me_logged_in', keepSignedIn);
 
+    // optional: store password if you really need it (security risk)
     await prefs.setString("password", password.text.trim());
 
     print("Session saved: Token and User Data stored locally.");
   }
 
+  bool _validateLoginFields() {
+    final e = email.text.trim();
+    final p = password.text.trim();
+
+    if (e.isEmpty) {
+      _showAlert(
+        icon: Icons.warning_amber_rounded,
+        color: AppColors.warning,
+        message: "Please enter your email address.",
+      );
+      return false;
+    }
+
+    if (!e.contains('@') || !e.contains('.')) {
+      _showAlert(
+        icon: Icons.warning_amber_rounded,
+        color: AppColors.warning,
+        message: "Please enter a valid email address.",
+      );
+      return false;
+    }
+
+    if (p.isEmpty) {
+      _showAlert(
+        icon: Icons.warning_amber_rounded,
+        color: AppColors.warning,
+        message: "Please enter your password.",
+      );
+      return false;
+    }
+
+    return true;
+  }
+
+  // ✅ ADD: helper to detect "email not verified" messages robustly
+  bool _isEmailNotVerifiedMessage(String msg) {
+    final m = msg.toLowerCase().trim();
+    return m.contains('email') &&
+        (m.contains('not verified') ||
+            m.contains('unverified') ||
+            m.contains('verify your email') ||
+            m.contains('email verification') ||
+            m.contains('verify email'));
+  }
+
+  // ✅ ADD ONLY LOGIC: hit resend-otp endpoint (no UI changes)
+  Future<void> _resendOtpBeforeVerify(String enteredEmail) async {
+    try {
+      await http.post(
+        Uri.parse("${ApiConfig.baseUrl}/resend-otp"),
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
+        body: jsonEncode({"email": enteredEmail}),
+      );
+    } catch (e) {
+      // Do not block navigation; requirement is just "must hit endpoint"
+      print("resend-otp error: $e");
+    }
+  }
+
+  // ✅ UPDATED: navigate to VerifyPage after 2 seconds (pass entered email)
+  //            AND before navigation, hit resend-otp endpoint
+  void _goToVerifyAfterDelay() {
+    _verifyNavTimer?.cancel();
+
+    final String enteredEmail = email.text.trim();
+
+    _verifyNavTimer = Timer(const Duration(seconds: 2), () async {
+      if (!mounted) return;
+
+      // ✅ Must hit resend-otp when navigating to verify
+      await _resendOtpBeforeVerify(enteredEmail);
+
+      if (!mounted) return;
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => VerifyPage(email: enteredEmail),
+        ),
+      );
+    });
+  }
+
   Future<void> sendData() async {
-    const String url = ApiConfig.baseUrl+"/login";
+    if (!_validateLoginFields()) return;
+    if (isLoading) return;
+
+    const String url = ApiConfig.baseUrl + "/login";
 
     final Map<String, dynamic> data = {
       "email": email.text.trim(),
-      "password": password.text.trim()
+      "password": password.text.trim(),
     };
 
     setState(() => isLoading = true);
@@ -69,46 +168,57 @@ class _LoginPageState extends State<LoginPage> {
 
       Map<String, dynamic>? body;
       if (response.body.isNotEmpty) {
-        body = jsonDecode(response.body);
+        try {
+          body = jsonDecode(response.body);
+        } catch (_) {
+          body = null;
+        }
       }
 
       if (body != null) {
         if (body['status'] == true && body['token'] != null) {
-
-          // 🔹 NEW: Save all data to SharedPreferences before navigating
           await _saveUserSession(body);
 
           if (!mounted) return;
 
-          printUserInfo();
-          // Use pushReplacement so users don't "back" into the login screen
+          await printUserInfo();
+
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (context) => Home()),
           );
         } else {
-          setState(() {
-            result = body?['message'] ?? "Login failed.";
-          });
+          final msg = body?['message']?.toString() ?? "Login failed.";
+
+          setState(() => result = msg);
 
           _showAlert(
             icon: Icons.warning_amber_rounded,
-            color: Colors.orange,
-            message: result,
+            color: AppColors.warning,
+            message: msg,
           );
+
+          // ✅ if email not verified → go to VerifyPage after 2 seconds
+          // (and that navigation will hit resend-otp)
+          if (_isEmailNotVerifiedMessage(msg)) {
+            _goToVerifyAfterDelay();
+          }
         }
       } else {
-        setState(() {
-          result = "Request failed (${response.statusCode})";
-        });
+        setState(() => result = "Request failed (${response.statusCode})");
+
+        _showAlert(
+          icon: Icons.error_outline,
+          color: AppColors.danger,
+          message: result,
+        );
       }
     } catch (e) {
-      setState(() {
-        result = "Network error: $e";
-      });
+      setState(() => result = "Network error: $e");
+
       _showAlert(
         icon: Icons.error,
-        color: Colors.red,
+        color: AppColors.danger,
         message: result,
       );
     } finally {
@@ -117,35 +227,29 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> printUserInfo() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-
-    // 1. Retrieve the JSON string using the key we used earlier
-    String? userJson = prefs.getString('user_data');
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String? userJson = prefs.getString('user_data');
 
     if (userJson != null) {
-      // 2. Decode the string back into a Map
-      Map<String, dynamic> user = jsonDecode(userJson);
+      final Map<String, dynamic> user = jsonDecode(userJson);
 
-      // 3. Access specific fields from your JSON structure
       print("--- User Profile ---");
       print("Full Name: ${user['first_name']} ${user['last_name']}");
       print("Email: ${user['email']}");
       print("Role: ${user['role']}");
 
-      // 4. Accessing nested data (the 'agent' object)
       if (user['agent'] != null) {
         print("Agent Region: ${user['agent']['region']}");
         print("Bank Account: ${user['agent']['bank_account_name']}");
       }
 
-      // 5. Check login preference
-      bool keepIn = prefs.getBool('keep_me_logged_in') ?? false;
+      final bool keepIn = prefs.getBool('keep_me_logged_in') ?? false;
       print("Keep Logged In: $keepIn");
-
     } else {
       print("No user data found in storage.");
     }
   }
+
   void _showAlert({
     required IconData icon,
     required Color color,
@@ -153,6 +257,7 @@ class _LoginPageState extends State<LoginPage> {
   }) {
     showDialog(
       context: context,
+      barrierDismissible: true,
       builder: (dialogContext) {
         Future.delayed(const Duration(seconds: 3), () {
           if (Navigator.of(dialogContext).canPop()) {
@@ -195,7 +300,9 @@ class _LoginPageState extends State<LoginPage> {
     return InputDecoration(
       labelText: label,
       labelStyle: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
-      prefixIcon: prefixIcon != null ? Icon(prefixIcon, color: AppColors.primary, size: 20) : null,
+      prefixIcon: prefixIcon != null
+          ? Icon(prefixIcon, color: AppColors.primary, size: 20)
+          : null,
       suffixIcon: suffixIcon,
       isDense: true,
       filled: true,
@@ -203,7 +310,8 @@ class _LoginPageState extends State<LoginPage> {
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: AppColors.textSecondary.withOpacity(0.18), width: 1),
+        borderSide:
+            BorderSide(color: AppColors.textSecondary.withOpacity(0.18), width: 1),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
@@ -254,15 +362,23 @@ class _LoginPageState extends State<LoginPage> {
                   right: 16,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
+                    children: const [
+                      Text(
                         "Welcome Pinnacle Agent",
-                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: Colors.white),
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
                       ),
-                      const SizedBox(height: 4),
-                      const Text(
+                      SizedBox(height: 4),
+                      Text(
                         "Sign in to access your PFS dashboard\nand manage your sales in one place.",
-                        style: TextStyle(fontSize: 13, color: Colors.white, height: 1.4),
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.white,
+                          height: 1.4,
+                        ),
                       ),
                     ],
                   ),
@@ -275,9 +391,14 @@ class _LoginPageState extends State<LoginPage> {
                   child: Container(
                     decoration: BoxDecoration(
                       color: AppColors.background,
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                      borderRadius:
+                          const BorderRadius.vertical(top: Radius.circular(24)),
                       boxShadow: [
-                        BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 10, offset: const Offset(0, -2)),
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.12),
+                          blurRadius: 10,
+                          offset: const Offset(0, -2),
+                        ),
                       ],
                     ),
                     child: SingleChildScrollView(
@@ -291,9 +412,15 @@ class _LoginPageState extends State<LoginPage> {
                               color: AppColors.cardBackground,
                               borderRadius: BorderRadius.circular(20),
                               boxShadow: [
-                                BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 4)),
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.06),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 4),
+                                ),
                               ],
-                              border: Border.all(color: AppColors.primary.withOpacity(0.08)),
+                              border: Border.all(
+                                color: AppColors.primary.withOpacity(0.08),
+                              ),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -305,30 +432,58 @@ class _LoginPageState extends State<LoginPage> {
                                       height: 30,
                                       width: 30,
                                       decoration: BoxDecoration(
-                                        color: AppColors.primary.withOpacity(0.12),
+                                        color:
+                                            AppColors.primary.withOpacity(0.12),
                                         borderRadius: BorderRadius.circular(10),
                                       ),
-                                      child: const Icon(Icons.lock_outline, size: 18, color: AppColors.primary),
+                                      child: const Icon(
+                                        Icons.lock_outline,
+                                        size: 18,
+                                        color: AppColors.primary,
+                                      ),
                                     ),
                                     const SizedBox(width: 10),
                                     const Expanded(
                                       child: Text(
                                         'Sign in to PFS',
-                                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppColors.textPrimary,
+                                        ),
                                       ),
                                     ),
                                   ],
                                 ),
                                 const SizedBox(height: 18),
-                                const Text("Email address", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+                                const Text(
+                                  "Email address",
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                ),
                                 const SizedBox(height: 6),
                                 TextField(
                                   controller: email,
                                   keyboardType: TextInputType.emailAddress,
-                                  decoration: _inputDecoration(label: 'Email', prefixIcon: Icons.person_outline),
+                                  decoration: _inputDecoration(
+                                    label: 'Email',
+                                    prefixIcon: Icons.person_outline,
+                                  ),
+                                  onSubmitted: (_) =>
+                                      FocusScope.of(context).nextFocus(),
                                 ),
                                 const SizedBox(height: 14),
-                                const Text("Password", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+                                const Text(
+                                  "Password",
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                ),
                                 const SizedBox(height: 6),
                                 TextField(
                                   controller: password,
@@ -337,14 +492,26 @@ class _LoginPageState extends State<LoginPage> {
                                     label: 'Password',
                                     prefixIcon: Icons.lock_outline,
                                     suffixIcon: IconButton(
-                                      icon: Icon(passwordVisible ? Icons.visibility : Icons.visibility_off, size: 18, color: AppColors.textSecondary),
-                                      onPressed: () => setState(() => passwordVisible = !passwordVisible),
+                                      icon: Icon(
+                                        passwordVisible
+                                            ? Icons.visibility
+                                            : Icons.visibility_off,
+                                        size: 18,
+                                        color: AppColors.textSecondary,
+                                      ),
+                                      onPressed: () => setState(() =>
+                                          passwordVisible = !passwordVisible),
                                     ),
                                   ),
+                                  onSubmitted: (_) {
+                                    if (!_validateLoginFields()) return;
+                                    sendData();
+                                  },
                                 ),
                                 const SizedBox(height: 8),
                                 Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                   children: [
                                     Row(
                                       mainAxisSize: MainAxisSize.min,
@@ -352,57 +519,124 @@ class _LoginPageState extends State<LoginPage> {
                                         Checkbox(
                                           value: keepSignedIn,
                                           activeColor: AppColors.primary,
-                                          onChanged: (val) => setState(() => keepSignedIn = val ?? false),
+                                          onChanged: (val) => setState(
+                                              () => keepSignedIn = val ?? false),
                                         ),
-                                        const Text('Keep me logged in', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                                        const Text(
+                                          'Keep me logged in',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: AppColors.textSecondary,
+                                          ),
+                                        ),
                                       ],
                                     ),
                                     TextButton(
                                       onPressed: () {
-
-                                         Navigator.push(context, MaterialPageRoute(builder: (context) => const ForgotPasswordPage()));
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (context) =>
+                                                const ForgotPasswordPage(),
+                                          ),
+                                        );
                                       },
-                                      child: const Text('Forgot password?', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: AppColors.primary)),
+                                      child: const Text(
+                                        'Forgot password?',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                          color: AppColors.primary,
+                                        ),
+                                      ),
                                     ),
                                   ],
                                 ),
                                 const SizedBox(height: 12),
                                 isLoading
-                                    ? const Center(child: SizedBox(height: 32, width: 32, child: CircularProgressIndicator(strokeWidth: 2.6, color: AppColors.primary)))
+                                    ? const Center(
+                                        child: SizedBox(
+                                          height: 32,
+                                          width: 32,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2.6,
+                                            color: AppColors.primary,
+                                          ),
+                                        ),
+                                      )
                                     : SizedBox(
-                                  width: double.infinity,
-                                  child: ElevatedButton(
-                                    onPressed: sendData,
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: AppColors.primary,
-                                      foregroundColor: Colors.white,
-                                      elevation: 0,
-                                      padding: const EdgeInsets.symmetric(vertical: 14),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                    ),
-                                    child: const Text('Login'),
-                                  ),
-                                ),
+                                        width: double.infinity,
+                                        child: ElevatedButton(
+                                          onPressed: isLoading ? null : sendData,
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: AppColors.primary,
+                                            foregroundColor: Colors.white,
+                                            elevation: 0,
+                                            padding: const EdgeInsets.symmetric(
+                                                vertical: 14),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(16),
+                                            ),
+                                          ),
+                                          child: const Text('Login'),
+                                        ),
+                                      ),
                                 const SizedBox(height: 16),
                                 Row(
                                   children: [
-                                    Expanded(child: Container(height: 1, color: Colors.grey.withOpacity(0.25))),
+                                    Expanded(
+                                      child: Container(
+                                        height: 1,
+                                        color: Colors.grey.withOpacity(0.25),
+                                      ),
+                                    ),
                                     const SizedBox(width: 8),
-                                    const Text("New to PFS?", style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                                    const Text(
+                                      "New to PFS?",
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: AppColors.textSecondary,
+                                      ),
+                                    ),
                                     const SizedBox(width: 8),
-                                    Expanded(child: Container(height: 1, color: Colors.grey.withOpacity(0.25))),
+                                    Expanded(
+                                      child: Container(
+                                        height: 1,
+                                        color: Colors.grey.withOpacity(0.25),
+                                      ),
+                                    ),
                                   ],
                                 ),
                                 const SizedBox(height: 12),
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    const Text("Don't have an account?", style: TextStyle(fontSize: 13, color: AppColors.textPrimary)),
+                                    const Text(
+                                      "Don't have an account?",
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: AppColors.textPrimary,
+                                      ),
+                                    ),
                                     TextButton(
                                       onPressed: () {
-                                        Navigator.push(context, MaterialPageRoute(builder: (context) => const SignUpPage()));
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (context) =>
+                                                const SignUpPage(),
+                                          ),
+                                        );
                                       },
-                                      child: const Text('Sign up', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.primary)),
+                                      child: const Text(
+                                        'Sign up',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.primary,
+                                        ),
+                                      ),
                                     ),
                                   ],
                                 ),

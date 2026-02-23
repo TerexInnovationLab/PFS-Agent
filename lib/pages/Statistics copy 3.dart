@@ -20,15 +20,8 @@ class _StatisticsState extends State<Statistics> {
   // ================== TARGETS / SUMMARY ==================
   String _category = "---";
   int _commission = 0;
-
-  // ✅ transport amounts split into MID + END
-  int _transportMidAmount = 0;
-  int _transportEndAmount = 0;
-
-  // ✅ Generated under progress bar MUST come from: transport_incentive.accumulated.month_end
-  int _accumulated = 0;
-
-  // ✅ Target under progress bar
+  int _accumulated = 0; // ✅ comes from transport_incentive.accumulated
+  int _transportIncentive = 0;
   int _targetAmount = 0;
 
   // ✅ percentage MUST come from TargetsService payload ONLY
@@ -38,8 +31,6 @@ class _StatisticsState extends State<Statistics> {
   bool _percentLoaded = false;
 
   String _monthYear = "";
-
-  // ✅ Total generated MUST come from TargetsService payload: total_amount (NO calculation)
   int total = 0;
 
   // ✅ UI listens to this only; it gets updated ONLY from TargetsService payload
@@ -117,14 +108,7 @@ class _StatisticsState extends State<Statistics> {
     _targetsService.startPolling();
   }
 
-  // ✅ Updates ONLY from targets service payload.
-  // ✅ Requirements:
-  // - total generated card -> data['total_amount']
-  // - Generated: K... below progressbar -> data['transport_incentive']['accumulated']['month_end']
-  //
-  // ✅ Backward compatibility:
-  // - If accumulated is not a map (API sends number), use it.
-  // - If month_end missing, fall back to mid_month then raw accumulated.
+  // ✅ Progress + Generated amount come ONLY from targets service payload.
   Future<void> _handleTargetsPayload(dynamic data) async {
     if (!mounted) return;
     if (_targetsUpdateInProgress) return;
@@ -133,78 +117,49 @@ class _StatisticsState extends State<Statistics> {
     try {
       String nextCategory = _category;
       int nextCommission = _commission;
-
-      int nextMid = _transportMidAmount;
-      int nextEnd = _transportEndAmount;
-
+      int nextTransportIncentive = _transportIncentive;
       int nextTargetAmount = _targetAmount;
-      int nextAccumulated = _accumulated;
-
-      String nextMonthYear = _monthYear;
-      int nextPercent = percenta;
-
+      int nextAccumulated = _accumulated; // ✅ new
       int nextTotal = total;
+      String nextMonthYear = _monthYear;
+
+      int nextPercent = percenta;
 
       if (data is Map) {
         nextCategory = data['category']?.toString() ?? "N/A";
         nextCommission = _toInt(data['commission']);
         nextMonthYear = "${data['month']} ${data['year']}".toUpperCase();
 
-        // ✅ total generated from TargetsService: total_amount
-        nextTotal =
-            _toInt(data['total_amount'] ?? data['total'] ?? data['totalGenerated']);
-
-        // ✅ transport incentive must be from transport_incentive (per your requirement)
         final transport = data['transport_incentive'];
         if (transport is Map) {
-          // target
           nextTargetAmount = _toInt(transport['target']);
 
-          // ✅ accumulated MUST use month_end
+          // ✅ accumulated: allow both map and direct number
           final acc = transport['accumulated'];
           if (acc is Map) {
-            // primary requirement
-            nextAccumulated = _toInt(acc['month_end']);
-
-            // fallbacks (safe)
+            // prefer mid_month if present, else month_end, else 0
+            nextAccumulated = _toInt(acc['mid_month']);
             if (nextAccumulated == 0) {
-              nextAccumulated = _toInt(acc['mid_month']);
-            }
-            if (nextAccumulated == 0) {
-              nextAccumulated = _toInt(acc['value'] ?? acc['amount']);
+              nextAccumulated = _toInt(acc['month_end']);
             }
           } else {
-            // if API ever returns a number directly
             nextAccumulated = _toInt(acc);
           }
 
-          // MID amount
           final midMonth = transport['mid_month'];
           if (midMonth is Map) {
-            nextMid = _toInt(midMonth['amount']);
-          } else {
-            nextMid = _toInt(transport['mid_amount'] ?? transport['mid']);
+            nextTransportIncentive = _toInt(midMonth['amount']);
           }
 
-          // END amount (support several possible keys)
-          final endMonth = transport['end_month'] ??
-              transport['end'] ??
-              transport['month_end'] ??
-              transport['end_month_amount'];
-
-          if (endMonth is Map) {
-            nextEnd = _toInt(endMonth['amount']);
-          } else {
-            nextEnd = _toInt(endMonth);
-          }
-
-          // percent (service-only)
+          // ✅ percent comes ONLY from TargetsService payload
           dynamic percentRaw = transport['percent'] ?? transport['percentage'];
           if (percentRaw == null && midMonth is Map) {
             percentRaw = midMonth['percent'] ?? midMonth['percentage'];
           }
           nextPercent = _toPercentInt(percentRaw);
         }
+
+        nextTotal = nextTransportIncentive + nextCommission;
       }
 
       if (!mounted) return;
@@ -212,18 +167,10 @@ class _StatisticsState extends State<Statistics> {
       setState(() {
         _category = nextCategory;
         _commission = nextCommission;
-
-        _transportMidAmount = nextMid;
-        _transportEndAmount = nextEnd;
-
-        // ✅ Generated under bar (month_end)
-        _accumulated = nextAccumulated;
-
+        _transportIncentive = nextTransportIncentive;
         _targetAmount = nextTargetAmount;
-
-        // ✅ Total generated from service ONLY
+        _accumulated = nextAccumulated; // ✅ set generated from accumulated
         total = nextTotal;
-
         _monthYear = nextMonthYear;
 
         percenta = nextPercent;
@@ -310,20 +257,6 @@ class _StatisticsState extends State<Statistics> {
   void dispose() {
     _progressPct.dispose();
     super.dispose();
-  }
-
-  // ================= MONEY FORMATTER =================
-  // "1200000" -> "1,200,000"
-  String _formatMoneyInt(int amount) {
-    final s = amount.abs().toString();
-    final buf = StringBuffer();
-    for (int i = 0; i < s.length; i++) {
-      final idxFromEnd = s.length - i;
-      buf.write(s[i]);
-      if (idxFromEnd > 1 && idxFromEnd % 3 == 1) buf.write(',');
-    }
-    final out = buf.toString();
-    return amount < 0 ? "-$out" : out;
   }
 
   @override
@@ -447,7 +380,7 @@ class _StatisticsState extends State<Statistics> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                "Generated: K${_formatMoneyInt(_accumulated)}",
+                "Generated: K${_formatMoney(_accumulated.toDouble())}",
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 11,
@@ -455,7 +388,7 @@ class _StatisticsState extends State<Statistics> {
                 ),
               ),
               Text(
-                "Target: K${_formatMoneyInt(_targetAmount)}",
+                "Target: K${_formatMoney(_targetAmount.toDouble())}",
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 11,
@@ -545,16 +478,15 @@ class _StatisticsState extends State<Statistics> {
             Expanded(
               child: _statCard(
                 title: "Commission earned",
-                value: "K${_formatMoneyInt(_commission)}",
+                value: "K${_formatMoney(_commission.toDouble())}",
                 icon: Icons.payments_outlined,
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: _transportIncentiveCardUniform(
+              child: _statCard(
                 title: "Transport incentive",
-                midAmount: _transportMidAmount,
-                endAmount: _transportEndAmount,
+                value: "K${_formatMoney(_transportIncentive.toDouble())}",
                 icon: Icons.directions_bus_filled_outlined,
               ),
             ),
@@ -566,7 +498,7 @@ class _StatisticsState extends State<Statistics> {
             width: MediaQuery.of(context).size.width * 0.5 - 8,
             child: _statCard(
               title: "Total generated",
-              value: "K${_formatMoneyInt(total)}",
+              value: "K${_formatMoney(total.toDouble())}",
               icon: Icons.trending_up_rounded,
               accentColor: AppColors.secondary,
             ),
@@ -631,81 +563,6 @@ class _StatisticsState extends State<Statistics> {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 14,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _transportIncentiveCardUniform({
-    required String title,
-    required int midAmount,
-    required int endAmount,
-    required IconData icon,
-    Color? accentColor,
-  }) {
-    final Color accent = accentColor ?? AppColors.primary;
-    final String midFmt = _formatMoneyInt(midAmount);
-    final String endFmt = _formatMoneyInt(endAmount);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      decoration: BoxDecoration(
-        color: AppColors.cardBackground,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: accent.withOpacity(0.08)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            height: 30,
-            width: 30,
-            decoration: BoxDecoration(
-              color: accent.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, size: 18, color: accent),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            "Mid: K$midFmt",
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            "End: K$endFmt",
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 12,
               fontWeight: FontWeight.w700,
               color: AppColors.textPrimary,
             ),
@@ -809,11 +666,10 @@ class _StatisticsState extends State<Statistics> {
 
   // ================= EARNINGS CHART =================
   Widget _buildEarningsChartCard() {
-    final transportTotal = _transportMidAmount + _transportEndAmount;
-
     final data = [
       _ChartItem("Commission", _commission.toDouble(), AppColors.primary),
-      _ChartItem("Transport", transportTotal.toDouble(), AppColors.secondary),
+      _ChartItem("Transport", _transportIncentive.toDouble(),
+          AppColors.secondary),
       _ChartItem("Total", total.toDouble(), AppColors.info),
     ];
 
@@ -1009,6 +865,16 @@ class _StatisticsState extends State<Statistics> {
         ),
       ],
     );
+  }
+
+  // ================= HELPERS =================
+  static String _formatMoney(double value) {
+    return value
+        .toStringAsFixed(0)
+        .replaceAllMapped(
+          RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+          (Match m) => "${m[1]},",
+        );
   }
 }
 

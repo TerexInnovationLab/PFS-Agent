@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
+import 'package:pfs_agent/layouts/Colors.dart';
 import 'package:pfs_agent/pages/Home.dart';
+import 'package:pfs_agent/pages/OTPResetCodePage.dart';
 import 'package:pfs_agent/pages/Splash.dart';
 import 'package:pfs_agent/pages/login.dart';
 import 'package:pfs_agent/pages/reset_password.dart';
+import 'package:pfs_agent/pages/verify.dart';
 
 void main() {
   // 2. Ensure bindings are initialized
@@ -41,11 +44,20 @@ class _MyAppState extends State<MyApp> {
       debugShowCheckedModeBanner: false,
       title: 'PFS Agent',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color.fromRGBO(241, 104, 49, 1)),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFF16831)),
         useMaterial3: true,
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: Color(0xFFFDE1D6),
+
+        )
       ),
-      // home: ResetPasswordPage(email: "user@example.com"),
+      // home: ResetPasswordPage(email: "user@example.com", token: "your_token_here"),
       home: Splash(), 
+    //  home: OTPResetCodePage(email: "user@example.com"),
+    //  home: VerifyPage(email: "user@example.com"), 
+
+    //  home: ResetPasswordPage(),
     );
   }
-}
+}  

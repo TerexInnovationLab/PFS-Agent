@@ -1,12 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';
 import 'package:http/http.dart' as http;
+
 import 'package:pfs_agent/layouts/Colors.dart';
 import 'package:pfs_agent/pages/PendingPage.dart';
 import 'package:pfs_agent/pages/verify.dart';
-
 
 import '../config/api_config.dart';
 import 'login.dart';
@@ -20,8 +21,6 @@ class SignUpPage extends StatefulWidget {
 
 class _SignUpPageState extends State<SignUpPage> {
   final Color orange = const Color(0xFFFF6600);
-
-  // Background image to match system
   final String _backgroundImage = 'assets/images/back.jpeg';
 
   // page controllers
@@ -36,6 +35,7 @@ class _SignUpPageState extends State<SignUpPage> {
   final TextEditingController idNumber = TextEditingController();
   final TextEditingController dateOfBirth = TextEditingController();
 
+  // ✅ Postal fields (postal_address optional in UI, but still sent to backend as "" for compatibility)
   final TextEditingController postalAddress = TextEditingController();
   final TextEditingController postalCode = TextEditingController();
   final TextEditingController postalTown = TextEditingController();
@@ -45,10 +45,10 @@ class _SignUpPageState extends State<SignUpPage> {
   final TextEditingController branch = TextEditingController();
 
   // selections
-  String? _selectedGender;
-  String? _selectedId;
-  String? _maritalStatus;
-  String? _region; // now will be one of: north, central-east, central-west, south-east, south-west
+  String? _selectedGender; // "Male" / "Female"
+  String? _selectedId; // optional if you use it later
+  String? _maritalStatus; // stores: "single" / "married" / "divorced" / "widowed"
+  String? _region; // "north" / "central-east" / "central-west" / "south-east" / "south-west"
 
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
@@ -57,8 +57,6 @@ class _SignUpPageState extends State<SignUpPage> {
   bool isLoading = false;
 
   String result = "result";
-
-
   String? _selectedBank;
 
   final List<String> _banks = [
@@ -73,6 +71,25 @@ class _SignUpPageState extends State<SignUpPage> {
     "Ecobank",
   ];
 
+  @override
+  void dispose() {
+    firstName.dispose();
+    middleName.dispose();
+    surnameName.dispose();
+    email.dispose();
+    phone.dispose();
+    password.dispose();
+    confirmPassword.dispose();
+    idNumber.dispose();
+    dateOfBirth.dispose();
+    postalAddress.dispose();
+    postalCode.dispose();
+    postalTown.dispose();
+    bankAccountName.dispose();
+    bankAccountNumber.dispose();
+    branch.dispose();
+    super.dispose();
+  }
 
   // ---------- ALERT ----------
   void _showAlert({
@@ -88,13 +105,16 @@ class _SignUpPageState extends State<SignUpPage> {
       builder: (dialogContext) {
         if (autoClose) {
           Future.delayed(const Duration(seconds: 2), () {
+            if (!mounted) return;
             if (Navigator.of(dialogContext).canPop()) {
               Navigator.of(dialogContext).pop();
             }
             if (navigateToVerify) {
               Navigator.pushReplacement(
                 context,
-                MaterialPageRoute(builder: (context) => const VerifyPage()),
+                MaterialPageRoute(
+                  builder: (context) => VerifyPage(email: email.text.trim()),
+                ),
               );
             }
           });
@@ -102,9 +122,7 @@ class _SignUpPageState extends State<SignUpPage> {
 
         return AlertDialog(
           backgroundColor: AppColors.cardBackground,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
           contentPadding: const EdgeInsets.all(24),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -126,6 +144,43 @@ class _SignUpPageState extends State<SignUpPage> {
               ),
             ],
           ),
+        );
+      },
+    );
+  }
+
+  // ---------- WARNING DIALOG ----------
+  void _showWarningDialog(String message) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: AppColors.cardBackground,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text(
+            "Warning",
+            style: TextStyle(
+              color: AppColors.textPrimary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          content: Text(
+            message,
+            style: const TextStyle(fontSize: 14, color: AppColors.textPrimary),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text(
+                "OK",
+                style: TextStyle(
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
         );
       },
     );
@@ -153,20 +208,13 @@ class _SignUpPageState extends State<SignUpPage> {
 
   /// 🔒 VALIDATION: don't allow moving forward until step is valid
   bool _validateCurrentStep() {
-    List<String> missing = [];
+    final missing = <String>[];
 
     switch (pageNumber) {
-    // ---------- STEP 0: Personal details ----------
       case 0:
-        if (firstName.text.trim().isEmpty) {
-          missing.add("First Name");
-        }
-        if (surnameName.text.trim().isEmpty) {
-          missing.add("Surname");
-        }
-        if (email.text.trim().isEmpty) {
-          missing.add("Email");
-        }
+        if (firstName.text.trim().isEmpty) missing.add("First Name");
+        if (surnameName.text.trim().isEmpty) missing.add("Surname");
+        if (email.text.trim().isEmpty) missing.add("Email");
 
         if (missing.isNotEmpty) {
           _showWarningDialog(
@@ -175,27 +223,17 @@ class _SignUpPageState extends State<SignUpPage> {
           return false;
         }
 
-        // Extra: email format
         if (!email.text.contains('@') || !email.text.contains('.')) {
           _showWarningDialog("Please enter a valid email address.");
           return false;
         }
         return true;
 
-    // ---------- STEP 1: Contact & security ----------
       case 1:
-        if (phone.text.trim().isEmpty) {
-          missing.add("Phone Number");
-        }
-        if (password.text.trim().isEmpty) {
-          missing.add("Password");
-        }
-        if (confirmPassword.text.trim().isEmpty) {
-          missing.add("Confirm Password");
-        }
-        if (_selectedGender == null) {
-          missing.add("Gender");
-        }
+        if (phone.text.trim().isEmpty) missing.add("Phone Number");
+        if (password.text.trim().isEmpty) missing.add("Password");
+        if (confirmPassword.text.trim().isEmpty) missing.add("Confirm Password");
+        if (_selectedGender == null) missing.add("Gender");
 
         if (missing.isNotEmpty) {
           _showWarningDialog(
@@ -204,31 +242,21 @@ class _SignUpPageState extends State<SignUpPage> {
           return false;
         }
 
-        if (password.text.trim().length < 4) {
-          _showWarningDialog(
-            "Password should be at least 4 characters long.",
-          );
+        if (password.text.trim().length < 8) {
+          _showWarningDialog("Password should be at least 8 characters long.");
           return false;
         }
+
         if (password.text.trim() != confirmPassword.text.trim()) {
-          _showWarningDialog(
-            "Password and confirm password do not match.",
-          );
+          _showWarningDialog("Password and confirm password do not match.");
           return false;
         }
         return true;
 
-    // ---------- STEP 2: Identity information ----------
       case 2:
-        if (idNumber.text.trim().isEmpty) {
-          missing.add("Identity Number");
-        }
-        if (dateOfBirth.text.trim().isEmpty) {
-          missing.add("Date Of Birth");
-        }
-        if (_maritalStatus == null) {
-          missing.add("Marital Status");
-        }
+        if (idNumber.text.trim().isEmpty) missing.add("Identity Number");
+        if (dateOfBirth.text.trim().isEmpty) missing.add("Date Of Birth");
+        if (_maritalStatus == null) missing.add("Marital Status");
 
         if (missing.isNotEmpty) {
           _showWarningDialog(
@@ -238,14 +266,9 @@ class _SignUpPageState extends State<SignUpPage> {
         }
         return true;
 
-    // ---------- STEP 3: Address information ----------
       case 3:
-        if (postalAddress.text.trim().isEmpty) {
-          missing.add("Postal Address");
-        }
-        if (_region == null) {
-          missing.add("Region");
-        }
+        // ✅ Postal fields are OPTIONAL now, only Region is required
+        if (_region == null) missing.add("Region");
 
         if (missing.isNotEmpty) {
           _showWarningDialog(
@@ -255,17 +278,10 @@ class _SignUpPageState extends State<SignUpPage> {
         }
         return true;
 
-    // ---------- STEP 4: Banking information ----------
       case 4:
-        if (bankAccountName.text.trim().isEmpty) {
-          missing.add("Bank Account Name");
-        }
-        if (bankAccountNumber.text.trim().isEmpty) {
-          missing.add("Bank Account Number");
-        }
-        if (branch.text.trim().isEmpty) {
-          missing.add("Branch");
-        }
+        if (bankAccountName.text.trim().isEmpty) missing.add("Bank Account Name");
+        if (bankAccountNumber.text.trim().isEmpty) missing.add("Bank Account Number");
+        if (branch.text.trim().isEmpty) missing.add("Branch");
 
         if (missing.isNotEmpty) {
           _showWarningDialog(
@@ -280,36 +296,53 @@ class _SignUpPageState extends State<SignUpPage> {
     }
   }
 
-  Future<void> sendData() async {
-    // Final guard: ensure last step is valid
-    if (!_validateCurrentStep()) return;
+  // ✅ Builds a readable message from Laravel-style validation errors
+  String _buildErrorMessageFromResponse(int statusCode, String bodyText) {
+    try {
+      final decoded = jsonDecode(bodyText);
 
-    const String url =
-        ApiConfig.baseUrl+"/agent";
+      if (decoded is Map<String, dynamic>) {
+        final msg = decoded['message']?.toString();
 
-    // Map selections to backend-safe values
-    String gender = (_selectedGender ?? 'Male').toLowerCase(); // male/female
-    String identityType =
-    _selectedId == null ? "national_id" : _selectedId!.toLowerCase();
+        final errors = decoded['errors'];
+        if (errors is Map) {
+          final lines = <String>[];
+          errors.forEach((_, v) {
+            if (v is List && v.isNotEmpty) {
+              lines.add(v.first.toString());
+            } else if (v != null) {
+              lines.add(v.toString());
+            }
+          });
+          if (lines.isNotEmpty) return lines.join('\n');
+        }
 
-    String marital;
-    switch (_maritalStatus) {
-      case "Married":
-        marital = "married";
-        break;
-      case "Divorced":
-        marital = "divorced";
-        break;
-      case "Widowed":
-        marital = "widowed";
-        break;
-      default:
-        marital = "single";
+        if (msg != null && msg.trim().isNotEmpty) return msg;
+      }
+    } catch (_) {
+      // ignore parse error
     }
 
-    // 🔹 Region now comes directly from radio: north, central-east, central-west, south-east, south-west
-    String region = _region ?? 'north';
+    // fallback
+    return "Request failed ($statusCode). Please try again.";
+  }
 
+  Future<void> sendData() async {
+    if (!_validateCurrentStep()) return;
+    if (isLoading) return;
+
+    const String url = ApiConfig.baseUrl + "/agent";
+
+    // backend-safe values
+    final String gender = (_selectedGender ?? 'Male').toLowerCase(); // male/female
+    final String identityType =
+        _selectedId == null ? "national_id" : _selectedId!.toLowerCase();
+    final String marital = (_maritalStatus ?? "single").toLowerCase();
+    final String region = _region ?? 'north';
+
+    // ✅ IMPORTANT:
+    // Even though postal_address is OPTIONAL in UI, we STILL send it (as "" if empty)
+    // to behave like your original working code and avoid backend NOT NULL / required issues.
     final Map<String, dynamic> data = {
       "first_name": firstName.text.trim(),
       "middle_name": middleName.text.trim(),
@@ -317,21 +350,28 @@ class _SignUpPageState extends State<SignUpPage> {
       "email": email.text.trim(),
       "phone": phone.text.trim(),
       "gender": gender,
-      "identity_type": "national_id",
+
+      "identity_type": identityType,
       "identity_type_number": idNumber.text.trim(),
+
       "marital_status": marital,
+
       "date_joined":
-      "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}",
+          "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}",
       "date_of_birth": dateOfBirth.text.trim(),
+
+      // ✅ keep keys consistent with original working payload
       "postal_address": postalAddress.text.trim(),
       "postal_code": postalCode.text.trim(),
       "postal_town": postalTown.text.trim(),
+
       "bank_account_name": bankAccountName.text.trim(),
       "bank_account_number": bankAccountNumber.text.trim(),
       "branch": branch.text.trim(),
       "region": region,
+
       "password": password.text.trim(),
-      "password_confirmation": confirmPassword.text.trim()
+      "password_confirmation": confirmPassword.text.trim(),
     };
 
     setState(() => isLoading = true);
@@ -339,7 +379,7 @@ class _SignUpPageState extends State<SignUpPage> {
     try {
       final response = await http.post(
         Uri.parse(url),
-        headers: {
+        headers: const {
           "Content-Type": "application/json",
           "Accept": "application/json",
         },
@@ -347,100 +387,48 @@ class _SignUpPageState extends State<SignUpPage> {
       );
 
       Map<String, dynamic>? body;
-
       if (response.body.isNotEmpty) {
-        body = jsonDecode(response.body);
+        try {
+          body = jsonDecode(response.body);
+        } catch (_) {
+          body = null;
+        }
       }
 
-      if (body != null && body['message'] != null) {
-        result = body['message'].toString();
+      if (response.statusCode == 201) {
+        final message = body?['message']?.toString() ??
+            "Account created successfully. Please verify your email.";
 
-        if (result.toLowerCase() != "success") {
-          _showWarningDialog(result);
-        } else {
-          _showAlert(
-            icon: Icons.check_circle,
-            color: Colors.green,
-            message: "Registration successful",
-            autoClose: true,
-            navigateToVerify: true,
-          );
-        }
+        _showAlert(
+          icon: Icons.check_circle,
+          color: Colors.green,
+          message: message,
+          autoClose: true,
+          navigateToVerify: true,
+        );
       } else {
-        result = "Request failed (\${response.statusCode})";
-        _showWarningDialog(result);
+        final msg =
+            _buildErrorMessageFromResponse(response.statusCode, response.body);
+        _showWarningDialog(msg);
       }
     } catch (e) {
-      result = "Connect to the internet and try again.";
-      _showWarningDialog(result);
+      _showWarningDialog("Connect to the internet and try again.\n$e");
     } finally {
-      setState(() => isLoading = false);
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
-  // ---------- WARNING DIALOG ----------
-  void _showWarningDialog(String message) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: AppColors.cardBackground,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: const Text(
-            "Warning",
-            style: TextStyle(
-              color: AppColors.textPrimary,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          content: Text(
-            message,
-            style: const TextStyle(
-              fontSize: 14,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop();
-              },
-              child: const Text(
-                "OK",
-                style: TextStyle(
-                  color: AppColors.primary,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
   // ---------- FIELD DECORATION ----------
-  InputDecoration _fieldDecoration(
-      String label, {
-        IconData? icon,
-      }) {
+  InputDecoration _fieldDecoration(String label, {IconData? icon}) {
     return InputDecoration(
       labelText: label,
-      labelStyle: const TextStyle(
-        fontSize: 13,
-        color: AppColors.textSecondary,
-      ),
-      prefixIcon: icon != null
-          ? Icon(icon, color: AppColors.primary, size: 20)
-          : null,
+      labelStyle: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+      prefixIcon:
+          icon != null ? Icon(icon, color: AppColors.primary, size: 20) : null,
       isDense: true,
       filled: true,
       fillColor: AppColors.background,
-      contentPadding:
-      const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide(
@@ -450,10 +438,7 @@ class _SignUpPageState extends State<SignUpPage> {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(
-          color: AppColors.primary,
-          width: 1.4,
-        ),
+        borderSide: const BorderSide(color: AppColors.primary, width: 1.4),
       ),
     );
   }
@@ -468,21 +453,17 @@ class _SignUpPageState extends State<SignUpPage> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // Hero background
+          // background
           Positioned(
             left: 0,
             right: 0,
             top: 0,
             child: SizedBox(
               height: 220,
-              child: Image.asset(
-                _backgroundImage,
-                fit: BoxFit.cover,
-              ),
+              child: Image.asset(_backgroundImage, fit: BoxFit.cover),
             ),
           ),
-
-          // Dark gradient overlay
+          // gradient
           Positioned(
             left: 0,
             right: 0,
@@ -491,10 +472,7 @@ class _SignUpPageState extends State<SignUpPage> {
               height: 220,
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [
-                    Color(0xE6000000),
-                    Color(0x00000000),
-                  ],
+                  colors: [Color(0xE6000000), Color(0x00000000)],
                   begin: Alignment.bottomCenter,
                   end: Alignment.topCenter,
                 ),
@@ -505,7 +483,7 @@ class _SignUpPageState extends State<SignUpPage> {
           SafeArea(
             child: Stack(
               children: [
-                // HEADER TEXT
+                // header
                 Positioned(
                   top: 100,
                   left: 16,
@@ -534,7 +512,7 @@ class _SignUpPageState extends State<SignUpPage> {
                   ),
                 ),
 
-                // MAIN CONTENT (bottom sheet)
+                // bottom sheet
                 Positioned(
                   top: size.height * 0.26,
                   left: 0,
@@ -543,9 +521,8 @@ class _SignUpPageState extends State<SignUpPage> {
                   child: Container(
                     decoration: BoxDecoration(
                       color: AppColors.background,
-                      borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(24),
-                      ),
+                      borderRadius:
+                          const BorderRadius.vertical(top: Radius.circular(24)),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withOpacity(0.12),
@@ -558,9 +535,7 @@ class _SignUpPageState extends State<SignUpPage> {
                       padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
                       child: Center(
                         child: ConstrainedBox(
-                          constraints: const BoxConstraints(
-                            maxWidth: 520,
-                          ),
+                          constraints: const BoxConstraints(maxWidth: 520),
                           child: _buildCard(),
                         ),
                       ),
@@ -589,14 +564,12 @@ class _SignUpPageState extends State<SignUpPage> {
             offset: const Offset(0, 4),
           ),
         ],
-        border: Border.all(
-          color: AppColors.primary.withOpacity(0.08),
-        ),
+        border: Border.all(color: AppColors.primary.withOpacity(0.08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header row with icon + title
+          // header row
           Row(
             children: [
               Container(
@@ -638,29 +611,21 @@ class _SignUpPageState extends State<SignUpPage> {
           const SizedBox(height: 16),
           Text(
             _pageSubtitle(),
-            style: const TextStyle(
-              fontSize: 12,
-              color: AppColors.textSecondary,
-            ),
+            style:
+                const TextStyle(fontSize: 12, color: AppColors.textSecondary),
           ),
           const SizedBox(height: 18),
 
-          // Page content
+          // content
           _buildPageContent(),
 
           const SizedBox(height: 18),
-
-          // Bottom nav buttons / submit / loading
-          if (pageNumber < 4)
-            _buildNavButtons()
-          else
-            _buildSubmitRow(),
+          if (pageNumber < 4) _buildNavButtons() else _buildSubmitRow(),
         ],
       ),
     );
   }
 
-  // ---------- STEP INDICATOR ----------
   Widget _buildStepIndicator() {
     const int totalSteps = 5;
 
@@ -669,21 +634,16 @@ class _SignUpPageState extends State<SignUpPage> {
         final bool isActive = index == pageNumber;
         final bool isCompleted = index < pageNumber;
 
-        Color color;
-        if (isCompleted) {
-          color = AppColors.primary;
-        } else if (isActive) {
-          color = AppColors.primary.withOpacity(0.9);
-        } else {
-          color = AppColors.textSecondary.withOpacity(0.25);
-        }
+        final Color color = isCompleted
+            ? AppColors.primary
+            : isActive
+                ? AppColors.primary.withOpacity(0.9)
+                : AppColors.textSecondary.withOpacity(0.25);
 
         return Expanded(
           child: Container(
             height: 4,
-            margin: EdgeInsets.only(
-              right: index == totalSteps - 1 ? 0 : 4,
-            ),
+            margin: EdgeInsets.only(right: index == totalSteps - 1 ? 0 : 4),
             decoration: BoxDecoration(
               color: color,
               borderRadius: BorderRadius.circular(999),
@@ -728,7 +688,6 @@ class _SignUpPageState extends State<SignUpPage> {
     }
   }
 
-  // ---------- PAGE CONTENT SWITCH ----------
   Widget _buildPageContent() {
     switch (pageNumber) {
       case 0:
@@ -768,15 +727,10 @@ class _SignUpPageState extends State<SignUpPage> {
       children: [
         IntlPhoneField(
           controller: phone,
-          decoration: _fieldDecoration(
-            'Phone Number',
-            icon: Icons.phone_outlined,
-          ),
+          decoration:
+              _fieldDecoration('Phone Number', icon: Icons.phone_outlined),
           initialCountryCode: 'MW',
-          style: const TextStyle(
-            fontSize: 14,
-            color: AppColors.textPrimary,
-          ),
+          style: const TextStyle(fontSize: 14, color: AppColors.textPrimary),
         ),
         const SizedBox(height: 12),
         _passwordField(password, 'Password'),
@@ -785,10 +739,9 @@ class _SignUpPageState extends State<SignUpPage> {
         const SizedBox(height: 18),
         _sectionTitle("Gender"),
         const SizedBox(height: 4),
-        _radio("Male", _selectedGender,
-                (v) => setState(() => _selectedGender = v)),
+        _radio("Male", _selectedGender, (v) => setState(() => _selectedGender = v)),
         _radio("Female", _selectedGender,
-                (v) => setState(() => _selectedGender = v)),
+            (v) => setState(() => _selectedGender = v)),
       ],
     );
   }
@@ -804,14 +757,14 @@ class _SignUpPageState extends State<SignUpPage> {
         const SizedBox(height: 16),
         _sectionTitle("Marital Status"),
         const SizedBox(height: 4),
-        _radio("Single", _maritalStatus,
-                (v) => setState(() => _maritalStatus = v), value: "single"),
-        _radio("Married", _maritalStatus,
-                (v) => setState(() => _maritalStatus = v), value: "married"),
-        _radio("Divorced", _maritalStatus,
-                (v) => setState(() => _maritalStatus = v), value: "divorced"),
-        _radio("Widowed", _maritalStatus,
-                (v) => setState(() => _maritalStatus = v), value: "widowed"),
+        _radio("Single", _maritalStatus, (v) => setState(() => _maritalStatus = v),
+            value: "single"),
+        _radio("Married", _maritalStatus, (v) => setState(() => _maritalStatus = v),
+            value: "married"),
+        _radio("Divorced", _maritalStatus, (v) => setState(() => _maritalStatus = v),
+            value: "divorced"),
+        _radio("Widowed", _maritalStatus, (v) => setState(() => _maritalStatus = v),
+            value: "widowed"),
       ],
     );
   }
@@ -821,28 +774,30 @@ class _SignUpPageState extends State<SignUpPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _textField(postalAddress, 'Postal Address', Icons.home_outlined),
+        _textField(postalAddress, 'Postal Address (optional)', Icons.home_outlined),
         const SizedBox(height: 12),
-        _textField(
-            postalCode, 'Postal Code (optional)', Icons.local_post_office_outlined),
+        _textField(postalCode, 'Postal Code (optional)',
+            Icons.local_post_office_outlined),
         const SizedBox(height: 12),
-        _textField(
-            postalTown, 'Postal Town (optional)', Icons.location_city_outlined),
+        _textField(postalTown, 'Postal Town (optional)',
+            Icons.location_city_outlined),
         const SizedBox(height: 16),
         _sectionTitle("Region"),
         const SizedBox(height: 4),
-        // 🔹 New region options: values are exactly what backend expects
         _radio("North", _region, (v) => setState(() => _region = v), value: "north"),
-        _radio("Central-East", _region, (v) => setState(() => _region = v), value: "central-east"),
-        _radio("Central-West", _region, (v) => setState(() => _region = v), value: "central-west"),
-        _radio("South-East", _region, (v) => setState(() => _region = v), value: "south-east"),
-        _radio("South-West", _region, (v) => setState(() => _region = v), value: "south-west"),
+        _radio("Central-East", _region, (v) => setState(() => _region = v),
+            value: "central-east"),
+        _radio("Central-West", _region, (v) => setState(() => _region = v),
+            value: "central-west"),
+        _radio("South-East", _region, (v) => setState(() => _region = v),
+            value: "south-east"),
+        _radio("South-West", _region, (v) => setState(() => _region = v),
+            value: "south-west"),
       ],
     );
   }
 
   // ---------- PAGE 4 ----------
-
   Widget _dropdownField({
     required String label,
     required String? value,
@@ -853,27 +808,18 @@ class _SignUpPageState extends State<SignUpPage> {
     return DropdownButtonFormField<String>(
       value: value,
       isExpanded: true,
-      icon: const Icon(
-        Icons.keyboard_arrow_down_rounded,
-        color: AppColors.textSecondary,
-      ),
+      icon: const Icon(Icons.keyboard_arrow_down_rounded,
+          color: AppColors.textSecondary),
       decoration: _fieldDecoration(label, icon: icon),
       dropdownColor: AppColors.cardBackground,
-      style: const TextStyle(
-        fontSize: 14,
-        color: AppColors.textPrimary,
-      ),
+      style: const TextStyle(fontSize: 14, color: AppColors.textPrimary),
       borderRadius: BorderRadius.circular(14),
       items: items.map((item) {
         return DropdownMenuItem<String>(
           value: item,
-          child: Text(
-            item,
-            style: const TextStyle(
-              fontSize: 14,
-              color: AppColors.textPrimary,
-            ),
-          ),
+          child: Text(item,
+              style:
+                  const TextStyle(fontSize: 14, color: AppColors.textPrimary)),
         );
       }).toList(),
       onChanged: onChanged,
@@ -896,37 +842,22 @@ class _SignUpPageState extends State<SignUpPage> {
           },
         ),
         const SizedBox(height: 12),
-
-        _textField(
-          bankAccountNumber,
-          'Bank Account Number',
-          Icons.confirmation_number_outlined,
-        ),
+        _textField(bankAccountNumber, 'Bank Account Number',
+            Icons.confirmation_number_outlined),
         const SizedBox(height: 12),
-
-        _textField(
-          branch,
-          'Branch',
-          Icons.location_on_outlined,
-        ),
+        _textField(branch, 'Branch', Icons.location_on_outlined),
       ],
     );
   }
 
   // ---------- FIELD BUILDERS ----------
   Widget _textField(
-      TextEditingController controller,
-      String label,
-      IconData icon,
-      ) {
+      TextEditingController controller, String label, IconData icon) {
     return TextFormField(
       textCapitalization: TextCapitalization.words,
       controller: controller,
       decoration: _fieldDecoration(label, icon: icon),
-      style: const TextStyle(
-        fontSize: 14,
-        color: AppColors.textPrimary,
-      ),
+      style: const TextStyle(fontSize: 14, color: AppColors.textPrimary),
     );
   }
 
@@ -934,19 +865,15 @@ class _SignUpPageState extends State<SignUpPage> {
     return TextFormField(
       controller: c,
       obscureText: _obscurePassword,
-      decoration: _fieldDecoration(
-        label,
-        icon: Icons.lock_outline,
-      ).copyWith(
+      decoration: _fieldDecoration(label, icon: Icons.lock_outline).copyWith(
         suffixIcon: IconButton(
           icon: Icon(
             _obscurePassword ? Icons.visibility_off : Icons.visibility,
             size: 18,
             color: AppColors.textSecondary,
           ),
-          onPressed: () => setState(() {
-            _obscurePassword = !_obscurePassword;
-          }),
+          onPressed: () =>
+              setState(() => _obscurePassword = !_obscurePassword),
         ),
       ),
     );
@@ -956,19 +883,17 @@ class _SignUpPageState extends State<SignUpPage> {
     return TextFormField(
       controller: confirmPassword,
       obscureText: _obscureConfirmPassword,
-      decoration: _fieldDecoration(
-        'Confirm Password',
-        icon: Icons.lock_outline,
-      ).copyWith(
+      decoration:
+          _fieldDecoration('Confirm Password', icon: Icons.lock_outline)
+              .copyWith(
         suffixIcon: IconButton(
           icon: Icon(
             _obscureConfirmPassword ? Icons.visibility_off : Icons.visibility,
             size: 18,
             color: AppColors.textSecondary,
           ),
-          onPressed: () => setState(() {
-            _obscureConfirmPassword = !_obscureConfirmPassword;
-          }),
+          onPressed: () => setState(
+              () => _obscureConfirmPassword = !_obscureConfirmPassword),
         ),
       ),
     );
@@ -978,12 +903,10 @@ class _SignUpPageState extends State<SignUpPage> {
     return TextFormField(
       controller: dateOfBirth,
       readOnly: true,
-      decoration: _fieldDecoration(
-        'Date Of Birth (YYYY-MM-DD)',
-        icon: Icons.calendar_today_outlined,
-      ),
+      decoration: _fieldDecoration('Date Of Birth (YYYY-MM-DD)',
+          icon: Icons.calendar_today_outlined),
       onTap: () async {
-        DateTime? pickedDate = await showDatePicker(
+        final pickedDate = await showDatePicker(
           context: context,
           initialDate: DateTime(1995, 1, 1),
           firstDate: DateTime(1900),
@@ -993,7 +916,7 @@ class _SignUpPageState extends State<SignUpPage> {
         if (pickedDate != null) {
           setState(() {
             dateOfBirth.text =
-            "${pickedDate.year}-${pickedDate.month.toString().padLeft(2, '0')}-${pickedDate.day.toString().padLeft(2, '0')}";
+                "${pickedDate.year}-${pickedDate.month.toString().padLeft(2, '0')}-${pickedDate.day.toString().padLeft(2, '0')}";
           });
         }
       },
@@ -1012,23 +935,14 @@ class _SignUpPageState extends State<SignUpPage> {
     );
   }
 
-  Widget _radio(
-      String displayText,
-      String? group,
-      Function(String?) onChanged, {
-        String? value,
-      }) {
+  Widget _radio(String displayText, String? group,
+      Function(String?) onChanged, {String? value}) {
     final val = value ?? displayText;
     return RadioListTile<String>(
       dense: true,
       contentPadding: EdgeInsets.zero,
-      title: Text(
-        displayText,
-        style: const TextStyle(
-          fontSize: 13,
-          color: AppColors.textPrimary,
-        ),
-      ),
+      title: Text(displayText,
+          style: const TextStyle(fontSize: 13, color: AppColors.textPrimary)),
       value: val,
       groupValue: group,
       activeColor: AppColors.primary,
@@ -1046,14 +960,12 @@ class _SignUpPageState extends State<SignUpPage> {
             onPressed: previousPage,
             style: OutlinedButton.styleFrom(
               foregroundColor: AppColors.textSecondary,
-              side: BorderSide(
-                color: AppColors.textSecondary.withOpacity(0.4),
-              ),
+              side:
+                  BorderSide(color: AppColors.textSecondary.withOpacity(0.4)),
               padding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
+                  borderRadius: BorderRadius.circular(14)),
               textStyle: const TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
@@ -1071,27 +983,20 @@ class _SignUpPageState extends State<SignUpPage> {
             },
             child: const Text(
               "Back to login",
-              style: TextStyle(
-                fontSize: 13,
-                color: AppColors.textSecondary,
-              ),
+              style: TextStyle(fontSize: 13, color: AppColors.primary),
             ),
           ),
         ElevatedButton(
           onPressed: () {
-            if (_validateCurrentStep()) {
-              nextPage();
-            }
+            if (_validateCurrentStep()) nextPage();
           },
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
             elevation: 0,
-            padding:
-            const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             textStyle: const TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
@@ -1111,54 +1016,36 @@ class _SignUpPageState extends State<SignUpPage> {
           onPressed: previousPage,
           style: OutlinedButton.styleFrom(
             foregroundColor: AppColors.textSecondary,
-            side: BorderSide(
-              color: AppColors.textSecondary.withOpacity(0.4),
-            ),
-            padding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-            textStyle: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-            ),
+            side: BorderSide(color: AppColors.textSecondary.withOpacity(0.4)),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
           ),
           child: const Text("Previous"),
         ),
         isLoading
             ? const SizedBox(
-          height: 32,
-          width: 32,
-          child: CircularProgressIndicator(
-            strokeWidth: 2.6,
-            color: AppColors.primary,
-          ),
-        )
+                height: 32,
+                width: 32,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.6,
+                  color: AppColors.primary,
+                ),
+              )
             : ElevatedButton(
-          onPressed: () {
-            if (_validateCurrentStep()) {
-              sendData();
-            }
-          },
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-            elevation: 0,
-            padding: const EdgeInsets.symmetric(
-              horizontal: 18,
-              vertical: 10,
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-            textStyle: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          child: const Text("Submit"),
-        ),
+                onPressed: () {
+                  if (_validateCurrentStep()) sendData();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+                child: const Text("Submit"),
+              ),
       ],
     );
   }

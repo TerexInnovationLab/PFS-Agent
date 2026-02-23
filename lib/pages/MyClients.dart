@@ -1,81 +1,107 @@
-// lib/pages/MyClients.dart
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:pfs_agent/pages/AnalogSignUp.dart';
-import 'package:pfs_agent/pages/DigitalSignUp.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 
+import 'package:pfs_agent/pages/AnalogSignUp.dart';
+import 'package:pfs_agent/pages/DigitalSignUp.dart';
 
 import '../config/api_config.dart';
-
 import '../layouts/Colors.dart';
-import 'database/digital_registration_db.dart';
 
+import 'database/digital_registration_db.dart';
 import 'database_helper.dart';
+
 import 'ClentPreview.dart';
-import 'DigitalClientPreview.dart'; // adjust relative path if needed
+import 'DigitalClientPreview.dart';
 
 class MyClients extends StatefulWidget {
+  const MyClients({super.key});
+
   @override
   MyClientsState createState() => MyClientsState();
 }
 
-class MyClientsState extends State<MyClients> {
+class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
   bool listAvailable = false;
   List<Map<String, dynamic>> _clients = [];
 
-  // NEW: currently selected filter (all / approved / rejected / bounce / draft / pending)
+  // filter
   String _selectedFilter = 'all';
 
-  // Use same background image style as Dashboard
+  // header image
   final String _headerImage = 'assets/images/back1.png';
 
-  // Polling timer
+  // polling
   Timer? _pollTimer;
-  final String _statusUrl =
-      ApiConfig.baseUrl+'/registrations/status';
+  bool _pollingInProgress = false;
 
-  // Keep local maps to quickly find which local row corresponds to a server id
-  // key: createdId (string), value: local row id (int)
-  Map<String, int> _analogIdToRow = {};
-  Map<String, int> _digitalIdToRow = {};
+  // ✅ LIVE INDICATOR: true = ok, false = offline/error
+  bool _isLive = false;
 
-  // keep latest server response (optional debugging)
+  final String _statusUrl = "${ApiConfig.baseUrl}/registrations/status";
+
+  // server cache (id -> status/reason)
+  final Map<String, String> _statusByServerId = {};
+  final Map<String, String> _statusReasonByServerId = {};
+
+  // local lookup maps (serverId -> local row id)
+  final Map<String, int> _analogIdToRow = {};
+  final Map<String, int> _digitalIdToRow = {};
+
+  // debug
   String? _lastRawResponse;
 
   @override
   void initState() {
     super.initState();
-    _loadClients().then((_) {
-      // start polling after initial load
-      _startPolling();
-    });
+    WidgetsBinding.instance.addObserver(this);
+
+    // Load once, then start polling on the SAME page (no navigation needed)
+    _bootstrap();
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // keep clients refreshed if dependencies change
-    _loadClients();
+  Future<void> _bootstrap() async {
+    await _loadClients(); // local data
+    await _rebuildIdMaps(); // maps used for DB updates
+    _startPolling(); // every 2 seconds on this page
   }
 
   @override
   void dispose() {
     _stopPolling();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
-  void _startPolling() {
-    // If there's an existing timer, cancel it
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // pause polling when app is backgrounded to avoid wasted network
+    if (state == AppLifecycleState.resumed) {
+      _startPolling(immediate: true);
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      _stopPolling();
+    }
+  }
+
+  // ========================= POLLING =========================
+
+  void _startPolling({bool immediate = true}) {
     _stopPolling();
-    // Poll every 5 seconds
-    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
-      if (!mounted) return;
-      await _pollAndSyncStatuses();
+
+    if (immediate) {
+      // fire immediately so the user sees updates without waiting
+      // ignore: discarded_futures
+      _pollAndSyncStatuses();
+    }
+
+    _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      // ignore: discarded_futures
+      _pollAndSyncStatuses();
     });
   }
 
@@ -84,127 +110,106 @@ class MyClientsState extends State<MyClients> {
     _pollTimer = null;
   }
 
-  Future<void> _loadClients() async {
-    // 1) Load analog clients
-    final analog = await DatabaseHelper.instance.getData();
-    final analogWithSource = analog
-        .map<Map<String, dynamic>>((c) => {
-      ...c,
-      'source': 'analog',
-    })
-        .toList();
-
-    // 2) Load digital registrations
-    final digitalRegs = await DigitalRegistrationDb.instance.getAll();
-    final digital = digitalRegs.map<Map<String, dynamic>>((reg) {
-      return {
-        'id': reg.id,
-        'status': reg.status,
-        'data': jsonEncode(reg.data),
-        'source': 'digital',
-      };
-    }).toList();
-
-    if (!mounted) return;
-    setState(() {
-      _clients = [
-        ...analogWithSource,
-        ...digital,
-      ];
-      listAvailable = _clients.isNotEmpty;
-    });
+  Future<String?> _getToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('token');
   }
 
-  /// Build helper maps from server-created id -> local row id
-  Future<void> _buildIdMaps() async {
+  String _normalizeStatus(String? raw) {
+    final s = (raw ?? '').toString().toLowerCase().trim();
+    if (s == 'bounce') return 'bounced';
+    return s;
+  }
+
+  /// Extract the SAME "server id" you used when sending to /registrations/status.
+  /// (From your code: you collect id_number for analog and id_number/id for digital)
+  String? _extractServerIdFromClient(Map<String, dynamic> client) {
+    final source = client['source']?.toString() ?? 'analog';
+
+    if (source == 'digital') {
+      final dataRaw = client['data'];
+      if (dataRaw == null) return null;
+
+      try {
+        final decoded = jsonDecode(dataRaw.toString());
+        if (decoded is Map<String, dynamic>) {
+          final id = decoded['id_number'] ?? decoded['id'];
+          final s = id?.toString().trim();
+          if (s != null && s.isNotEmpty) return s;
+        }
+      } catch (_) {}
+    } else {
+      final formDataRaw = client['form_data'];
+      if (formDataRaw == null) return null;
+
+      try {
+        final decoded = jsonDecode(formDataRaw.toString());
+        if (decoded is Map<String, dynamic>) {
+          final id = decoded['id_number'];
+          final s = id?.toString().trim();
+          if (s != null && s.isNotEmpty) return s;
+        }
+      } catch (_) {}
+    }
+
+    return null;
+  }
+
+  String _getEffectiveStatus(Map<String, dynamic> client) {
+    final localStatus = _normalizeStatus(client['status']?.toString());
+    if (localStatus == 'draft') return localStatus;
+
+    final serverId = _extractServerIdFromClient(client);
+    if (serverId != null) {
+      final serverStatus = _statusByServerId[serverId];
+      if (serverStatus != null && serverStatus.trim().isNotEmpty) {
+        return serverStatus;
+      }
+    }
+    return localStatus;
+  }
+
+  String? _getReasonForClient(Map<String, dynamic> client) {
+    final status = _normalizeStatus(_getEffectiveStatus(client));
+    if (status != 'rejected' && status != 'bounced' && status != 'denied') {
+      return null;
+    }
+
+    final serverId = _extractServerIdFromClient(client);
+    if (serverId != null) {
+      final cached = _statusReasonByServerId[serverId];
+      if (cached != null && cached.trim().isNotEmpty) return cached;
+    }
+
+    final localReason = client['reason'];
+    if (localReason != null && localReason.toString().trim().isNotEmpty) {
+      return localReason.toString().trim();
+    }
+    return null;
+  }
+
+  Future<void> _rebuildIdMaps() async {
     _analogIdToRow.clear();
     _digitalIdToRow.clear();
-
-    // analog rows
-    final analogRows = await DatabaseHelper.instance.getData();
-    for (final r in analogRows) {
-      final formDataRaw = r['form_data'];
-      if (formDataRaw == null) continue;
-      try {
-        final parsed = json.decode(formDataRaw.toString());
-        if (parsed is Map<String, dynamic>) {
-          final createdId = parsed['id_number'];
-          if (createdId != null) {
-            final idStr = createdId.toString().trim();
-            if (idStr.isNotEmpty) {
-              final rowIdRaw = r['id'];
-              if (rowIdRaw != null) {
-                final rowId = rowIdRaw is int
-                    ? rowIdRaw
-                    : int.tryParse(rowIdRaw.toString());
-                if (rowId != null) {
-                  _analogIdToRow[idStr] = rowId;
-                }
-              }
-            }
-          }
-        }
-      } catch (e) {
-        // ignore parse errors for that row
-        print('Warning: failed to parse analog form_data for row ${r['id']}: $e');
-      }
-    }
-
-    // digital rows
-    final digitalRegs = await DigitalRegistrationDb.instance.getAll();
-    for (final reg in digitalRegs) {
-      try {
-        dynamic parsed;
-        if (reg.data is String) {
-          parsed = json.decode(reg.data as String);
-        } else {
-          parsed = reg.data;
-        }
-
-        if (parsed is Map<String, dynamic>) {
-          final createdId = parsed['id_number'] ?? parsed['id'];
-          if (createdId != null) {
-            final idStr = createdId.toString().trim();
-            if (idStr.isNotEmpty) {
-              final localId = reg.id; // local DB id for digital reg
-              if (localId != null) {
-                _digitalIdToRow[idStr] = localId;
-              }
-            }
-          }
-        }
-      } catch (e) {
-        print('Warning: failed to parse digital reg data for local id ${reg.id}: $e');
-      }
-    }
-
-    // debug
-    print('Analog id map: $_analogIdToRow');
-    print('Digital id map: $_digitalIdToRow');
-  }
-
-  /// Collect server ids the same way testing did: read analog form_data.id_number and digital data.id_number
-  Future<List<dynamic>> _collectServerIds() async {
-    final ids = <dynamic>[];
 
     // analog
     final analogRows = await DatabaseHelper.instance.getData();
     for (final r in analogRows) {
       final formDataRaw = r['form_data'];
       if (formDataRaw == null) continue;
+
       try {
-        final parsed = json.decode(formDataRaw.toString());
+        final parsed = jsonDecode(formDataRaw.toString());
         if (parsed is Map<String, dynamic>) {
-          final createdId = parsed['id_number'];
-          if (createdId != null) {
-            final idStr = createdId.toString().trim();
-            if (idStr.isNotEmpty && !ids.contains(createdId)) ids.add(createdId);
-          }
+          final createdId = parsed['id_number']?.toString().trim();
+          if (createdId == null || createdId.isEmpty) continue;
+
+          final rowIdRaw = r['id'];
+          final rowId =
+              rowIdRaw is int ? rowIdRaw : int.tryParse(rowIdRaw.toString());
+          if (rowId != null) _analogIdToRow[createdId] = rowId;
         }
-      } catch (e) {
-        // ignore per-row parse errors
-        print('Failed to parse analog form_data for row id ${r['id']}: $e');
-      }
+      } catch (_) {}
     }
 
     // digital
@@ -213,169 +218,261 @@ class MyClientsState extends State<MyClients> {
       try {
         dynamic parsed;
         if (reg.data is String) {
-          parsed = json.decode(reg.data as String);
+          parsed = jsonDecode(reg.data as String);
         } else {
           parsed = reg.data;
         }
+
         if (parsed is Map<String, dynamic>) {
-          final createdId = parsed['id_number'] ?? parsed['id'];
-          if (createdId != null) {
-            final idStr = createdId.toString().trim();
-            if (idStr.isNotEmpty && !ids.contains(createdId)) ids.add(createdId);
-          }
+          final createdId =
+              (parsed['id_number'] ?? parsed['id'])?.toString().trim();
+          if (createdId == null || createdId.isEmpty) continue;
+
+          if (reg.id != null) _digitalIdToRow[createdId] = reg.id!;
         }
-      } catch (e) {
-        print('Failed to parse digital reg data for local id ${reg.id}: $e');
-      }
+      } catch (_) {}
+    }
+  }
+
+  Future<List<String>> _collectServerIds() async {
+    // ✅ IMPORTANT:
+    // Don’t re-read DB every 2 seconds (slow).
+    // Use the already-loaded _clients list.
+    final ids = <String>{};
+
+    for (final c in _clients) {
+      final id = _extractServerIdFromClient(c);
+      if (id != null && id.isNotEmpty) ids.add(id);
     }
 
-    print('Collected server ids to check: $ids');
-    return ids;
+    return ids.toList();
   }
 
   Future<void> _pollAndSyncStatuses() async {
-    try {
-      // Build maps for quick lookup when updating DB rows
-      await _buildIdMaps();
+    if (_pollingInProgress) return;
+    if (!mounted) return;
 
-      final ids = await _collectServerIds();
-      if (ids.isEmpty) {
-        // nothing to do
+    _pollingInProgress = true;
+
+    try {
+      // No clients? Nothing to poll.
+      if (_clients.isEmpty) {
+        if (mounted) {
+          setState(() => _isLive = true); // page is OK; nothing to poll
+        }
         return;
       }
 
-      // prepare request
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token');
+      final ids = await _collectServerIds();
+      if (ids.isEmpty) {
+        if (mounted) {
+          setState(() => _isLive = true);
+        }
+        return;
+      }
 
-      final headers = {
+      final token = await _getToken();
+      final headers = <String, String>{
         'Accept': 'application/json',
         'Content-Type': 'application/json',
         if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
       };
 
-      final body = json.encode({'registration_ids': ids});
-      print('Polling status - POST $_statusUrl');
-      print('Headers: $headers');
-      print('Body: $body');
+      final body = jsonEncode({'registration_ids': ids});
 
       final response = await http
           .post(Uri.parse(_statusUrl), headers: headers, body: body)
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 6));
 
-      print('Poll response status: ${response.statusCode}');
-      print('Poll response body: ${response.body}');
       _lastRawResponse = response.body;
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        // server error — ignore this cycle but keep logs
+        if (mounted) {
+          setState(() => _isLive = false);
+        }
         return;
       }
 
-      Map<String, dynamic>? jsonResp;
+      dynamic decoded;
       try {
-        jsonResp = json.decode(response.body) as Map<String, dynamic>?;
-      } catch (e) {
-        print('Failed to decode poll JSON: $e');
+        decoded = jsonDecode(response.body);
+      } catch (_) {
+        if (mounted) {
+          setState(() => _isLive = false);
+        }
         return;
       }
 
-      if (jsonResp == null) return;
+      if (decoded is! Map<String, dynamic>) {
+        if (mounted) {
+          setState(() => _isLive = false);
+        }
+        return;
+      }
 
-      final dataRaw = jsonResp['data'];
-      if (dataRaw is! List) return;
+      final dataRaw = decoded['data'];
+      if (dataRaw is! List) {
+        if (mounted) {
+          setState(() => _isLive = false);
+        }
+        return;
+      }
 
-      var anyChanged = false;
+      // ✅ if we got here: polling worked
+      if (mounted) {
+        setState(() => _isLive = true);
+      }
 
-      // For each returned status item: { "id": 1, "status": "approved", "source": "upload" }
+      bool anyUiChange = false;
+      bool anyDbChange = false;
+
+      // For faster in-place UI updates, we update:
+      // 1) server caches (_statusByServerId/_statusReasonByServerId)
+      // 2) local DB statuses (so other screens also show correct status)
+      // 3) in-memory _clients list status values (so you see change instantly, no navigation)
       for (final item in dataRaw) {
         if (item is! Map) continue;
-        final serverId = item['id']?.toString();
+
+        final serverId = item['id']?.toString().trim();
         final serverStatusRaw = item['status']?.toString();
-        if (serverId == null || serverStatusRaw == null) continue;
-        final serverStatus = serverStatusRaw.toLowerCase().trim();
+        if (serverId == null ||
+            serverId.isEmpty ||
+            serverStatusRaw == null) continue;
 
-        // find local analog row (if any)
-        if (_analogIdToRow.containsKey(serverId)) {
-          final localRowId = _analogIdToRow[serverId]!;
-          // find current local status — need to read row
-          try {
-            final rows = await DatabaseHelper.instance.getData();
-            final matching = rows.where((r) {
-              final rowForm = r['form_data'];
-              if (rowForm == null) return false;
-              try {
-                final parsed = json.decode(rowForm.toString());
-                if (parsed is Map<String, dynamic>) {
-                  final created = parsed['id_number']?.toString();
-                  return created == serverId;
-                }
-              } catch (_) {}
-              return false;
-            }).toList();
+        final serverStatus = _normalizeStatus(serverStatusRaw);
+        final prior = _statusByServerId[serverId];
+        if (prior != serverStatus) {
+          _statusByServerId[serverId] = serverStatus;
+          anyUiChange = true;
+        } else {
+          // still keep cache populated
+          _statusByServerId[serverId] = serverStatus;
+        }
 
-            final localRow = matching.isNotEmpty ? matching.first : null;
-            final currentLocalStatus = (localRow != null && localRow.isNotEmpty) ? (localRow['status']?.toString() ?? '') : '';
-
-            if (currentLocalStatus.toLowerCase() != serverStatus) {
-              // update DB row status
-              await DatabaseHelper.instance.updateStatus(localRowId, serverStatus);
-              anyChanged = true;
-              print('Updated analog row $localRowId status -> $serverStatus (server id $serverId)');
-            }
-          } catch (e) {
-            print('Error updating analog status for serverId $serverId: $e');
+        final reasonRaw = item['reason']?.toString();
+        if (reasonRaw != null && reasonRaw.trim().isNotEmpty) {
+          final reason = reasonRaw.trim();
+          final priorReason = _statusReasonByServerId[serverId];
+          if (priorReason != reason) {
+            _statusReasonByServerId[serverId] = reason;
+            anyUiChange = true;
+          } else {
+            _statusReasonByServerId[serverId] = reason;
           }
         }
 
-        // find local digital row (if any)
-        if (_digitalIdToRow.containsKey(serverId)) {
-          final localDigitalId = _digitalIdToRow[serverId]!;
-          try {
-            // Read the digital record to compare status
-            final digitalRegs = await DigitalRegistrationDb.instance.getAll();
-            final matching = digitalRegs.where((r) {
-              try {
-                dynamic parsed;
-                if (r.data is String) {
-                  parsed = json.decode(r.data as String);
-                } else {
-                  parsed = r.data;
-                }
-                if (parsed is Map<String, dynamic>) {
-                  final created = (parsed['id_number'] ?? parsed['id'])?.toString();
-                  return created == serverId;
-                }
-              } catch (_) {}
-              return false;
-            }).toList();
-
-            final localReg = matching.isNotEmpty ? matching.first : null;
-            final currentLocalStatus = localReg != null ? (localReg.status?.toString() ?? '') : '';
-
-            if (currentLocalStatus.toLowerCase() != serverStatus) {
-              // Note: assume DigitalRegistrationDb has updateStatus(localId, newStatus)
-              await DigitalRegistrationDb.instance.updateStatus(localDigitalId, serverStatus);
-              anyChanged = true;
-              print('Updated digital local id $localDigitalId status -> $serverStatus (server id $serverId)');
-            }
-          } catch (e) {
-            print('Error updating digital status for serverId $serverId: $e');
+        // === Update local DB rows (analog + digital) if changed ===
+        final analogRowId = _analogIdToRow[serverId];
+        if (analogRowId != null) {
+          final currentLocal = _findLocalClientStatusByServerId(serverId);
+          if (currentLocal == null || currentLocal != serverStatus) {
+            await DatabaseHelper.instance.updateStatus(analogRowId, serverStatus);
+            anyDbChange = true;
           }
         }
-      } // end for each item
 
-      if (anyChanged) {
-        // refresh clients and the UI
-        await _loadClients();
+        final digitalLocalId = _digitalIdToRow[serverId];
+        if (digitalLocalId != null) {
+          final currentLocal = _findLocalClientStatusByServerId(serverId);
+          if (currentLocal == null || currentLocal != serverStatus) {
+            await DigitalRegistrationDb.instance
+                .updateStatus(digitalLocalId, serverStatus);
+            anyDbChange = true;
+          }
+        }
+
+        // === Update the in-memory list so UI changes immediately ===
+        final updated = _applyStatusToInMemoryClient(serverId, serverStatus);
+        if (updated) anyUiChange = true;
       }
-    } catch (e, st) {
-      print('Exception in polling: $e\n$st');
-      // ignore — we'll retry next tick
+
+      // If DB changed a lot (e.g. new records or deletions), reload list and rebuild maps.
+      if (anyDbChange) {
+        await _loadClients();
+        await _rebuildIdMaps();
+        anyUiChange = true;
+      }
+
+      if (anyUiChange && mounted) {
+        setState(() {});
+      }
+    } on TimeoutException {
+      if (mounted) setState(() => _isLive = false);
+    } catch (_) {
+      if (mounted) setState(() => _isLive = false);
+    } finally {
+      _pollingInProgress = false;
     }
   }
 
-  /// 👇 smart name extractor
+  String? _findLocalClientStatusByServerId(String serverId) {
+    for (final c in _clients) {
+      final id = _extractServerIdFromClient(c);
+      if (id == serverId) {
+        return _normalizeStatus(c['status']?.toString());
+      }
+    }
+    return null;
+  }
+
+  bool _applyStatusToInMemoryClient(String serverId, String newStatus) {
+    bool changed = false;
+
+    for (int i = 0; i < _clients.length; i++) {
+      final c = _clients[i];
+      final id = _extractServerIdFromClient(c);
+      if (id != serverId) continue;
+
+      final current = _normalizeStatus(c['status']?.toString());
+      // don't override drafts
+      if (current == 'draft') continue;
+
+      if (current != newStatus) {
+        _clients[i] = {
+          ...c,
+          'status': newStatus,
+        };
+        changed = true;
+      }
+    }
+
+    return changed;
+  }
+
+  // ========================= LOAD CLIENTS =========================
+
+  Future<void> _loadClients() async {
+    // 1) analog
+    final analog = await DatabaseHelper.instance.getData();
+    final analogWithSource = analog
+        .map<Map<String, dynamic>>((c) => {
+              ...c,
+              'status': _normalizeStatus(c['status']?.toString()),
+              'source': 'analog',
+            })
+        .toList();
+
+    // 2) digital
+    final digitalRegs = await DigitalRegistrationDb.instance.getAll();
+    final digital = digitalRegs.map<Map<String, dynamic>>((reg) {
+      return {
+        'id': reg.id,
+        'status': _normalizeStatus(reg.status?.toString()),
+        'data': jsonEncode(reg.data),
+        'source': 'digital',
+      };
+    }).toList();
+
+    if (!mounted) return;
+
+    setState(() {
+      _clients = [...analogWithSource, ...digital];
+      listAvailable = _clients.isNotEmpty;
+    });
+  }
+
+  // ========================= UI HELPERS =========================
+
   String _getClientName(Map<String, dynamic> client) {
     final info = client['information'];
     if (info != null && info.toString().trim().isNotEmpty) {
@@ -392,11 +489,8 @@ class MyClientsState extends State<MyClients> {
           final surname = (decoded['surname'] ?? '').toString().trim();
 
           final parts =
-          [title, firstName, surname].where((p) => p.isNotEmpty).toList();
-
-          if (parts.isNotEmpty) {
-            return parts.join(' ');
-          }
+              [title, firstName, surname].where((p) => p.isNotEmpty).toList();
+          if (parts.isNotEmpty) return parts.join(' ');
         }
       } catch (_) {}
     }
@@ -405,15 +499,12 @@ class MyClientsState extends State<MyClients> {
   }
 
   Future<void> _editClient(int id, String currentInfo) async {
-    TextEditingController _controller =
-    TextEditingController(text: currentInfo);
+    final controller = TextEditingController(text: currentInfo);
 
     await showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
           "Edit Client",
           style: TextStyle(
@@ -422,42 +513,40 @@ class MyClientsState extends State<MyClients> {
           ),
         ),
         content: TextField(
-          controller: _controller,
+          controller: controller,
           decoration: InputDecoration(
             labelText: "Client name",
             hintText: "Enter new name",
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text(
-              "Cancel",
-              style: TextStyle(color: AppColors.textSecondary),
-            ),
+            child:
+                Text("Cancel", style: TextStyle(color: AppColors.textSecondary)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
+                  borderRadius: BorderRadius.circular(12)),
             ),
             onPressed: () async {
-              if (_controller.text.trim().isEmpty) return;
+              if (controller.text.trim().isEmpty) return;
 
               await DatabaseHelper.instance
-                  .updateData(id, _controller.text.trim());
+                  .updateData(id, controller.text.trim());
+              if (!mounted) return;
+
               Navigator.pop(context);
-              _loadClients();
+              await _loadClients();
+              await _rebuildIdMaps();
 
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text("Client updated successfully"),
+                  content: const Text("Client updated successfully"),
                   backgroundColor: AppColors.success,
                 ),
               );
@@ -482,10 +571,13 @@ class MyClientsState extends State<MyClients> {
     }
 
     await _loadClients();
+    await _rebuildIdMaps();
+
+    if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text("Client deleted"),
+        content: const Text("Client deleted"),
         backgroundColor: AppColors.danger,
       ),
     );
@@ -575,14 +667,12 @@ class MyClientsState extends State<MyClients> {
                     color: AppColors.textPrimary,
                   ),
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  "Choose how you would like to register this client.",
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
+                // const SizedBox(height: 6),
+                // Text(
+                //   "Choose how you would like to register this client.",
+                //   style:
+                //       TextStyle(fontSize: 14, color: AppColors.textSecondary),
+                // ),
                 const SizedBox(height: 20),
                 ListTile(
                   leading: CircleAvatar(
@@ -592,40 +682,43 @@ class MyClientsState extends State<MyClients> {
                   ),
                   title: const Text("Digital registration"),
                   subtitle:
-                  const Text("Capture details directly in the application"),
+                      const Text("Capture details directly in the application"),
                   onTap: () {
                     Navigator.pop(context);
                     Navigator.push(
                       context,
                       MaterialPageRoute(
                           builder: (context) => const DigitalSignUp()),
-                    ).then((_) {
-                      _loadClients();
+                    ).then((_) async {
+                      await _loadClients();
+                      await _rebuildIdMaps();
+                      _startPolling(immediate: true);
                     });
                   },
                 ),
-                const SizedBox(height: 8),
-                ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: AppColors.secondary.withOpacity(0.1),
-                    child:
-                    const Icon(Icons.camera_alt, color: AppColors.secondary),
-                  ),
-                  title: const Text("Forms upload"),
-                  subtitle:
-                  const Text("Upload scanned/photographed registration"),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const AnalogSignUp(),
-                      ),
-                    ).then((_) {
-                      _loadClients();
-                    });
-                  },
-                ),
+                // const SizedBox(height: 8),
+                // ListTile(
+                //   leading: CircleAvatar(
+                //     backgroundColor: AppColors.secondary.withOpacity(0.1),
+                //     child: const Icon(Icons.camera_alt,
+                //         color: AppColors.secondary),
+                //   ),
+                //   title: const Text("Forms upload"),
+                //   subtitle:
+                //       const Text("Upload scanned/photographed registration"),
+                //   onTap: () {
+                //     Navigator.pop(context);
+                //     Navigator.push(
+                //       context,
+                //       MaterialPageRoute(
+                //           builder: (context) => const AnalogSignUp()),
+                //     ).then((_) async {
+                //       await _loadClients();
+                //       await _rebuildIdMaps();
+                //       _startPolling(immediate: true);
+                //     });
+                //   },
+                // ),
               ],
             ),
           ),
@@ -635,21 +728,18 @@ class MyClientsState extends State<MyClients> {
   }
 
   void _openClient(Map<String, dynamic> client) {
-    final statusRaw = client['status'] ?? '';
-    final status = statusRaw.toString().toLowerCase();
+    final status = _normalizeStatus(_getEffectiveStatus(client));
+    final reason = _getReasonForClient(client);
     final source = client['source']?.toString() ?? 'analog';
 
     if (status == 'draft') {
       if (source == 'digital') {
         Map<String, dynamic> draftData = {};
         final dataRaw = client['data'];
-
         if (dataRaw != null && dataRaw.toString().trim().isNotEmpty) {
           try {
             final decoded = jsonDecode(dataRaw.toString());
-            if (decoded is Map<String, dynamic>) {
-              draftData = decoded;
-            }
+            if (decoded is Map<String, dynamic>) draftData = decoded;
           } catch (_) {}
         }
 
@@ -661,46 +751,61 @@ class MyClientsState extends State<MyClients> {
               localId: client['id'] as int?,
             ),
           ),
-        ).then((_) => _loadClients());
+        ).then((_) async {
+          await _loadClients();
+          await _rebuildIdMaps();
+          _startPolling(immediate: true);
+        });
       } else {
         Navigator.push(
           context,
-          MaterialPageRoute(
-            builder: (_) => AnalogSignUp(draftClient: client),
-          ),
-        ).then((_) => _loadClients());
+          MaterialPageRoute(builder: (_) => AnalogSignUp(draftClient: client)),
+        ).then((_) async {
+          await _loadClients();
+          await _rebuildIdMaps();
+          _startPolling(immediate: true);
+        });
       }
+      return;
+    }
+
+    // not draft
+    if (source == 'digital') {
+      Map<String, dynamic> data = {};
+      final dataRaw = client['data'];
+
+      if (dataRaw != null && dataRaw.toString().trim().isNotEmpty) {
+        try {
+          final decoded = jsonDecode(dataRaw.toString());
+          if (decoded is Map<String, dynamic>) data = decoded;
+        } catch (_) {}
+      }
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => DigitalClientPreview(
+            data: data,
+            status: status,
+            reason: reason,
+          ),
+        ),
+      ).then((_) {
+        _startPolling(immediate: true);
+      });
     } else {
-      if (source == 'digital') {
-        Map<String, dynamic> data = {};
-        final dataRaw = client['data'];
-
-        if (dataRaw != null && dataRaw.toString().trim().isNotEmpty) {
-          try {
-            final decoded = jsonDecode(dataRaw.toString());
-            if (decoded is Map<String, dynamic>) {
-              data = decoded;
-            }
-          } catch (_) {}
-        }
-
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => DigitalClientPreview(
-              data: data,
-              status: status,
-            ),
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ClientPreview(
+            client: client,
+            status: status,
+            reason: reason,
           ),
-        );
-      } else {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ClientPreview(client: client),
-          ),
-        );
-      }
+        ),
+      ).then((_) {
+        _startPolling(immediate: true);
+      });
     }
   }
 
@@ -729,10 +834,7 @@ class MyClientsState extends State<MyClients> {
             Text(
               "Start by registering a new client. You can use digital registration or upload scanned forms.",
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color: AppColors.textSecondary,
-              ),
+              style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
             ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
@@ -740,10 +842,9 @@ class MyClientsState extends State<MyClients> {
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
                 padding:
-                const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(30),
-                ),
+                    borderRadius: BorderRadius.circular(30)),
               ),
               onPressed: () => _showSignUpOptions(context),
               icon: const Icon(Icons.person_add_outlined),
@@ -755,17 +856,17 @@ class MyClientsState extends State<MyClients> {
     );
   }
 
-  // 🔹 top bar over hero (back + title + add) – same “glass” feel as dashboard
+  // top bar
   Widget _buildTopBar(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 12, 8, 0),
       child: Row(
         children: [
           const SizedBox(width: 6),
-          Expanded(
+          const Expanded(
             child: Text(
               "My Clients",
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
                 color: Colors.white,
@@ -774,12 +875,8 @@ class MyClientsState extends State<MyClients> {
           ),
           IconButton(
             style: ButtonStyle(
-              backgroundColor: MaterialStateProperty.all(
-                AppColors.accent,
-              ),
-              shape: MaterialStateProperty.all(
-                const CircleBorder(),
-              ),
+              backgroundColor: MaterialStateProperty.all(AppColors.accent),
+              shape: MaterialStateProperty.all(const CircleBorder()),
             ),
             icon: const Icon(Icons.person_add, color: Colors.white),
             onPressed: () => _showSignUpOptions(context),
@@ -789,13 +886,12 @@ class MyClientsState extends State<MyClients> {
     );
   }
 
-  // NEW: build horizontal filter bar
   Widget _buildFilterBar() {
     final items = [
       {'key': 'all', 'label': 'All'},
       {'key': 'approved', 'label': 'Approved'},
       {'key': 'rejected', 'label': 'Rejected'},
-      {'key': 'bounce', 'label': 'Bounce'},
+      {'key': 'bounced', 'label': 'Bounced'},
       {'key': 'draft', 'label': 'Draft'},
       {'key': 'pending', 'label': 'Pending'},
     ];
@@ -810,7 +906,8 @@ class MyClientsState extends State<MyClients> {
           children: items.map((it) {
             final key = it['key']!;
             final label = it['label']!;
-            final bool selected = _selectedFilter == key;
+            final selected = _selectedFilter == key;
+
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
               child: ChoiceChip(
@@ -822,11 +919,7 @@ class MyClientsState extends State<MyClients> {
                   ),
                 ),
                 selected: selected,
-                onSelected: (_) {
-                  setState(() {
-                    _selectedFilter = key;
-                  });
-                },
+                onSelected: (_) => setState(() => _selectedFilter = key),
                 selectedColor: AppColors.primary,
                 backgroundColor: AppColors.cardBackground,
                 shape: RoundedRectangleBorder(
@@ -845,22 +938,18 @@ class MyClientsState extends State<MyClients> {
     );
   }
 
-  // helper: returns clients filtered per _selectedFilter
   List<Map<String, dynamic>> get _filteredClients {
     if (_selectedFilter == 'all') return _clients;
 
     final filter = _selectedFilter.toLowerCase().trim();
 
     return _clients.where((client) {
-      final statusRaw = (client['status'] ?? '').toString().toLowerCase().trim();
+      final statusRaw = _normalizeStatus(_getEffectiveStatus(client));
 
-      // special: "rejected" filter should include both 'rejected' and 'denied'
       if (filter == 'rejected') {
-        if (statusRaw == 'rejected' || statusRaw == 'denied') return true;
-        return false;
+        return statusRaw == 'rejected' || statusRaw == 'denied';
       }
 
-      // otherwise match exact status (e.g., approved, bounce, draft, pending)
       return statusRaw == filter;
     }).toList();
   }
@@ -871,17 +960,13 @@ class MyClientsState extends State<MyClients> {
       backgroundColor: AppColors.background,
       body: Stack(
         children: [
-          // 🔹 hero background like dashboard
           Positioned(
             left: 0,
             right: 0,
             top: 0,
             child: SizedBox(
               height: 220,
-              child: Image.asset(
-                _headerImage,
-                fit: BoxFit.cover,
-              ),
+              child: Image.asset(_headerImage, fit: BoxFit.cover),
             ),
           ),
           Positioned(
@@ -892,30 +977,24 @@ class MyClientsState extends State<MyClients> {
               height: 220,
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [
-                    Color(0xE6000000),
-                    Color(0x00000000),
-                  ],
+                  colors: [Color(0xE6000000), Color(0x00000000)],
                   begin: Alignment.bottomCenter,
                   end: Alignment.topCenter,
                 ),
               ),
             ),
           ),
-
           SafeArea(
             child: Column(
               children: [
                 _buildTopBar(context),
                 const SizedBox(height: 12),
-
-                // 🔹 main content sheet – same “card from bottom” feel
                 Expanded(
                   child: Container(
                     decoration: BoxDecoration(
                       color: AppColors.background,
-                      borderRadius:
-                      const BorderRadius.vertical(top: Radius.circular(24)),
+                      borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(24)),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withOpacity(0.12),
@@ -928,87 +1007,137 @@ class MyClientsState extends State<MyClients> {
                       padding: const EdgeInsets.fromLTRB(16, 18, 16, 20),
                       child: listAvailable
                           ? Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                "Clients",
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.textPrimary,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Text(
+                                      "Clients",
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.textPrimary,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 10, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color:
+                                            AppColors.primary.withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        "${_clients.length}",
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.primary,
+                                        ),
+                                      ),
+                                    ),
+                                    const Spacer(),
+
+                                    // ✅ LIVE/ERROR indicator (no spinner)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 10, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.cardBackground,
+                                        borderRadius:
+                                            BorderRadius.circular(999),
+                                        border: Border.all(
+                                          color: AppColors.primary
+                                              .withOpacity(0.06),
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Container(
+                                            height: 18,
+                                            width: 18,
+                                            decoration: BoxDecoration(
+                                              color: _isLive
+                                                  ? Colors.green
+                                                  : Colors.red,
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: Icon(
+                                              _isLive
+                                                  ? Icons.check
+                                                  : Icons.close,
+                                              size: 12,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            _isLive ? "Online" : "Offline",
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                              color: _isLive
+                                                  ? Colors.green
+                                                  : Colors.red,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ),
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color:
-                                  AppColors.primary.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  "${_clients.length}",
+                                const SizedBox(height: 8),
+                                Text(
+                                  "Tap a client to view details or long press for more options.",
                                   style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.primary,
-                                  ),
+                                      fontSize: 12,
+                                      color: AppColors.textSecondary),
                                 ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            "Tap a client to view details or long press for more options.",
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-
-                          // NEW: filter bar
-                          _buildFilterBar(),
-                          const SizedBox(height: 12),
-
-                          Expanded(
-                            child: _filteredClients.isNotEmpty
-                                ? ListView.separated(
-                              itemCount: _filteredClients.length,
-                              separatorBuilder: (_, __) =>
-                              const SizedBox(height: 4),
-                              itemBuilder: (context, index) {
-                                final client = _filteredClients[index];
-                                return GestureDetector(
-                                  onLongPress: () =>
-                                      _showEditDeleteOptions(client),
-                                  onTap: () => _openClient(client),
-                                  child: _buildClientItem(
-                                    _getClientName(client),
-                                    client['status']?.toString() ??
-                                        "pending",
-                                  ),
-                                );
-                              },
+                                const SizedBox(height: 12),
+                                _buildFilterBar(),
+                                const SizedBox(height: 12),
+                                Expanded(
+                                  child: _filteredClients.isNotEmpty
+                                      ? ListView.separated(
+                                          physics:
+                                              const BouncingScrollPhysics(),
+                                          itemCount: _filteredClients.length,
+                                          separatorBuilder: (_, __) =>
+                                              const SizedBox(height: 4),
+                                          itemBuilder: (context, index) {
+                                            final client =
+                                                _filteredClients[index];
+                                            return GestureDetector(
+                                              onLongPress: () =>
+                                                  _showEditDeleteOptions(
+                                                      client),
+                                              onTap: () => _openClient(client),
+                                              child: buildClientItem(
+                                                _getClientName(client),
+                                                _getEffectiveStatus(client),
+                                                reason:
+                                                    _getReasonForClient(client),
+                                              ),
+                                            );
+                                          },
+                                        )
+                                      : Center(
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(24.0),
+                                            child: Text(
+                                              "No clients in this category.",
+                                              style: TextStyle(
+                                                fontSize: 14,
+                                                color: AppColors.textSecondary,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                ),
+                              ],
                             )
-                                : Center(
-                              child: Padding(
-                                padding: const EdgeInsets.all(24.0),
-                                child: Text(
-                                  "No clients in this category.",
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: AppColors.textSecondary,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      )
                           : _buildEmptyState(),
                     ),
                   ),
@@ -1022,9 +1151,9 @@ class MyClientsState extends State<MyClients> {
   }
 }
 
-// ================= CLIENT ITEM CARD (same visual style) =================
-Widget _buildClientItem(String name, String statusRaw) {
-  final status = statusRaw.toString().toLowerCase();
+// ================= CLIENT ITEM CARD =================
+Widget buildClientItem(String name, String statusRaw, {String? reason}) {
+  final status = statusRaw.toString().toLowerCase().trim();
 
   Color statusColor;
   String label;
@@ -1038,21 +1167,23 @@ Widget _buildClientItem(String name, String statusRaw) {
       statusColor = AppColors.danger;
       label = "Denied";
       break;
-    case "rejected": // 👈 NEW SUPPORT
+    case "rejected":
       statusColor = AppColors.danger;
-      label = "Rejected"; // 👈 Display nicely
+      label = "Rejected";
       break;
-
+    case "bounced":
+      statusColor = AppColors.warning;
+      label = "Bounced";
+      break;
     case "draft":
       statusColor = AppColors.info;
       label = "Draft";
       break;
     case "pending":
     default:
-    // include bounce as pending fallback if not recognized
       if (status == 'bounce') {
         statusColor = AppColors.warning;
-        label = "Bounce";
+        label = "Bounced";
       } else {
         statusColor = AppColors.warning;
         label = "Pending";
@@ -1064,9 +1195,7 @@ Widget _buildClientItem(String name, String statusRaw) {
     decoration: BoxDecoration(
       color: AppColors.cardBackground,
       borderRadius: BorderRadius.circular(18),
-      border: Border.all(
-        color: AppColors.primary.withOpacity(0.06),
-      ),
+      border: Border.all(color: AppColors.primary.withOpacity(0.06)),
       boxShadow: [
         BoxShadow(
           color: Colors.black.withOpacity(0.06),
@@ -1079,7 +1208,6 @@ Widget _buildClientItem(String name, String statusRaw) {
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
       child: Row(
         children: [
-          // leading avatar/icon
           Container(
             width: 44,
             height: 44,
@@ -1094,8 +1222,6 @@ Widget _buildClientItem(String name, String statusRaw) {
             ),
           ),
           const SizedBox(width: 12),
-
-          // name + small status text
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1115,24 +1241,32 @@ Widget _buildClientItem(String name, String statusRaw) {
                   "Status: $label",
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: AppColors.textSecondary,
-                  ),
+                  style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
                 ),
+                if ((status == 'rejected' ||
+                        status == 'bounced' ||
+                        status == 'denied') &&
+                    reason != null &&
+                    reason.trim().isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    "Reason: ${reason.trim()}",
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                  ),
+                ],
               ],
             ),
           ),
-
           const SizedBox(width: 8),
-
-          // status pill + arrow
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Container(
                 padding:
-                const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
+                    const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
                 decoration: BoxDecoration(
                   color: statusColor.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(20),

@@ -7,8 +7,15 @@ import 'full_image_page.dart';
 
 class ClientPreview extends StatefulWidget {
   final Map<String, dynamic> client;
+  final String? status;
+  final String? reason;
 
-  const ClientPreview({Key? key, required this.client}) : super(key: key);
+  const ClientPreview({
+    Key? key,
+    required this.client,
+    this.status,
+    this.reason,
+  }) : super(key: key);
 
   @override
   ClientPreviewState createState() => ClientPreviewState();
@@ -24,7 +31,7 @@ class ClientPreviewState extends State<ClientPreview> {
     super.initState();
 
     _name = (widget.client['information'] ?? '') as String;
-    _status = (widget.client['status'] ?? 'pending').toString();
+    _status = (widget.status ?? widget.client['status'] ?? 'pending').toString();
 
     final formDataStr = widget.client['form_data'];
     if (formDataStr != null && formDataStr.toString().isNotEmpty) {
@@ -56,6 +63,8 @@ class ClientPreviewState extends State<ClientPreview> {
     switch (s) {
       case 'approved':
         return 'Approved';
+      case 'bounced':
+        return 'Bounced';
       case 'rejected':
         return 'rejected';
       case 'draft':
@@ -78,6 +87,7 @@ class ClientPreviewState extends State<ClientPreview> {
 
     return Scaffold(
       appBar: AppBar(
+          iconTheme: const IconThemeData(color: Colors.white),
         title: const Text('Client', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),),
         backgroundColor: AppColors.primary,
         centerTitle: true,
@@ -136,6 +146,30 @@ class ClientPreviewState extends State<ClientPreview> {
             ),
 
             const SizedBox(height: 16),
+            if ((_status.toLowerCase() == 'rejected' ||
+                    _status.toLowerCase() == 'bounced' ||
+                    _status.toLowerCase() == 'denied') &&
+                widget.reason != null &&
+                widget.reason!.trim().isNotEmpty)
+              Card(
+                color: const Color.fromARGB(255, 228, 208, 208),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.red[700],),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          widget.reason!.trim(),
+                           style: TextStyle(color: Colors.red[700],fontWeight: FontWeight.bold,),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
 
             // Only show "Details" and images if we have extra data
             if (_formData != null) ...[

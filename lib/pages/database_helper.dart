@@ -16,6 +16,7 @@ class DatabaseHelper {
   static const String columnInfo = "information"; // client name
   static const String columnStatus = "status";    // draft, pending, approved, denied
   static const String columnFormData = "form_data"; // JSON string of form
+  static const String columnReason = "reason"; // bounce reason
 
 
   // -------------------------------
@@ -40,7 +41,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 3,                // 👈 bump version
+      version: 4,                // 👈 bump version
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -53,7 +54,8 @@ class DatabaseHelper {
         $columnId INTEGER PRIMARY KEY AUTOINCREMENT,
         $columnInfo TEXT,
         $columnStatus TEXT,
-        $columnFormData TEXT
+        $columnFormData TEXT,
+        $columnReason TEXT
       )
     ''');
 
@@ -78,19 +80,25 @@ class DatabaseHelper {
         'ALTER TABLE $tableName ADD COLUMN $columnFormData TEXT',
       );
     }
+    if (oldVersion < 4) {
+      await db.execute(
+        'ALTER TABLE $tableName ADD COLUMN $columnReason TEXT',
+      );
+    }
   }
 
   // ----------------------------------------------------------
   // INSERT CLIENT (with optional form data)
   // ----------------------------------------------------------
   Future<int> insertClient(String name, String status,
-      {String? formData}) async {
+      {String? formData, String? reason}) async {
     final db = await instance.database;
 
     return await db.insert(tableName, {
       columnInfo: name,
       columnStatus: status,
       columnFormData: formData,
+      columnReason: reason,
     });
   }
 
@@ -141,16 +149,31 @@ class DatabaseHelper {
   }
 
   // ----------------------------------------------------------
+  // UPDATE REASON
+  // ----------------------------------------------------------
+  Future<int> updateReason(int id, String reason) async {
+    final db = await instance.database;
+
+    return await db.update(
+      tableName,
+      {columnReason: reason},
+      where: '$columnId = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // ----------------------------------------------------------
   // UPDATE NAME + STATUS + FORM DATA (generic)
   // ----------------------------------------------------------
   Future<int> updateClient(int id,
-      {String? name, String? status, String? formData}) async {
+      {String? name, String? status, String? formData, String? reason}) async {
     final db = await instance.database;
 
     final Map<String, Object?> values = {};
     if (name != null) values[columnInfo] = name;
     if (status != null) values[columnStatus] = status;
     if (formData != null) values[columnFormData] = formData;
+    if (reason != null) values[columnReason] = reason;
 
     if (values.isEmpty) return 0;
 

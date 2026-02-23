@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:pfs_agent/layouts/Colors.dart';
 import 'package:pfs_agent/pages/Contacts.dart';
 import 'package:pfs_agent/pages/Messages.dart';
+import 'package:pfs_agent/pages/ProfilePage.dart';
+
 
 
 class Chats extends StatefulWidget {
@@ -30,6 +32,7 @@ class ChatsState extends State<Chats> {
         backgroundColor: AppColors.primary,
         child: const Icon(Icons.chat, color: Colors.white),
       ),
+
       body: Stack(
         children: [
           // 🔹 Hero background (like dashboard)
@@ -175,19 +178,46 @@ class ChatsState extends State<Chats> {
               ),
             ),
           ),
-          IconButton(
-            style: ButtonStyle(
-              backgroundColor: WidgetStateProperty.all(
-                AppColors.accent,
-              ),
-              shape: WidgetStateProperty.all(
-                const CircleBorder(),
-              ),
-            ),
+          PopupMenuButton<int>(
             icon: const Icon(Icons.more_vert, color: Colors.white),
-            onPressed: () {
-              // future: open filters / settings
+            color: AppColors.cardBackground,
+            tooltip: 'More actions',
+            onSelected: (value) {
+              switch (value) {
+                case 1:
+                  showDialog(
+                    context: context,
+                    builder: (c) => AlertDialog(
+                      backgroundColor: AppColors.cardBackground,
+                      title: const Text('Filters'),
+                      content: const Text('Filter options go here.'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(c).pop(),
+                          child: const Text('Close'),
+                        ),
+                      ],
+                    ),
+                  );
+                  break;
+                case 2:
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('All conversations marked as read')),
+                  );
+                  break;
+                case 3:
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const ProfilePage()),
+                  );
+                  break;
+              }
             },
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: 1, child: Text('Filters')),
+              const PopupMenuItem(value: 2, child: Text('Mark all read')),
+              const PopupMenuItem(value: 3, child: Text('Profile')),
+            ],
           ),
         ],
       ),

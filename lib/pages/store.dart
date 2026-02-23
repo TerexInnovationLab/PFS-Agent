@@ -66,7 +66,7 @@ class _SignUpPageState extends State<SignUpPage> {
             if (navigateToVerify) {
               Navigator.pushReplacement(
                 context,
-                MaterialPageRoute(builder: (context) => const VerifyPage()),
+               MaterialPageRoute(builder: (context) => VerifyPage(email: email.text.trim())),
               );
             }
           });
