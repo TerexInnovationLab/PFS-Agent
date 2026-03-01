@@ -9,15 +9,13 @@ import 'package:pfs_agent/pages/DigitalSignUp.dart';
 import 'package:pfs_agent/pages/AnalogSignUp.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as p;
+import 'package:pfs_agent/services/client_status_summary_service.dart';
 
 import 'package:pfs_agent/layouts/Colors.dart';
 import 'package:pfs_agent/pages/ProfilePage.dart';
 import 'package:pfs_agent/pages/Statistics.dart';
 import 'package:pfs_agent/pages/CreateNewPasswordPage.dart';
 import 'package:pfs_agent/pages/login.dart';
-
-import 'database/digital_registration_db.dart';
-import 'database_helper.dart';
 
 import 'TargetsService.dart';
 
@@ -59,6 +57,7 @@ class _DashboardPageState extends State<DashboardPage> {
   int approvedclients = 0;
   int rejectedclients = 0;
   int bounceclients = 0;
+  bool _clientStatsLoaded = false;
 
   bool showBalance = false;
 
@@ -70,6 +69,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
   int _currentImageIndex = 0;
   Timer? _timer;
+  Timer? _summaryTimer;
+  bool _summaryUpdateInProgress = false;
 
   // ================== USER BASIC (TOP) ==================
   String? _userImageAssetPath = 'assets/images/user_profile.avif';
@@ -451,7 +452,21 @@ class _DashboardPageState extends State<DashboardPage> {
     _percentLoaded = false;
 
     _loadSavedImage();
+    const ClientStatusSummaryService().getCachedSummary().then((summary) {
+      if (!mounted || summary == null) return;
+      setState(() {
+        totalclients = summary.total;
+        pendingclients = summary.pending;
+        approvedclients = summary.approved;
+        rejectedclients = summary.rejected;
+        bounceclients = summary.bounced;
+        _clientStatsLoaded = true;
+      });
+    });
     _getCombinedStats();
+    _summaryTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _getCombinedStats();
+    });
 
     printUserInfo();
     _loadAllDetailsFromPrefs();
@@ -469,6 +484,7 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void dispose() {
     _timer?.cancel();
+    _summaryTimer?.cancel();
     super.dispose();
   }
 
@@ -807,7 +823,9 @@ class _DashboardPageState extends State<DashboardPage> {
                       Navigator.of(context).pop(true);
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (context) => Statistics()),
+                        MaterialPageRoute(
+                          builder: (context) => const Statistics(),
+                        ),
                       );
                     } else {
                       setStateDialog(() {
@@ -1693,61 +1711,29 @@ class _DashboardPageState extends State<DashboardPage> {
   // DB + STATS
   // =========================================================
 
-  Future<Map<String, int>> _getCombinedStats() async {
-    int approved = 0;
-    int rejected = 0;
-    int bounce = 0;
-    int pending = 0;
-    int totalLocal = 0;
+  Future<void> _getCombinedStats() async {
+    if (_summaryUpdateInProgress) return;
+    _summaryUpdateInProgress = true;
 
-    final db1List = await DigitalRegistrationDb.instance.getAll();
-    for (var item in db1List) {
-      final s = item.status.toLowerCase();
-      if (s == 'approved') {
-        approved++;
-      } else if (s == 'pending') {
-        pending++;
-      } else if (s == 'rejected' || s == 'denied') {
-        rejected++;
-      } else if (s == 'bounce') {
-        bounce++;
-      }
-    }
+    try {
+      final summary = await const ClientStatusSummaryService().fetchSummary();
+      if (!mounted || summary == null) return;
 
-    final db2List = await DatabaseHelper.instance.getData();
-    for (var item in db2List) {
-      final s = (item[DatabaseHelper.columnStatus] as String? ?? '')
-          .toLowerCase();
-      if (s == 'approved') {
-        approved++;
-      } else if (s == 'pending') {
-        pending++;
-      } else if (s == 'rejected' || s == 'denied') {
-        rejected++;
-      } else if (s == 'bounce') {
-        bounce++;
-      }
-    }
-
-    totalLocal = db1List.length + db2List.length;
-
-    if (mounted) {
       setState(() {
-        totalclients = approved + pending + rejected + bounce;
-        pendingclients = pending;
-        approvedclients = approved;
-        rejectedclients = rejected;
-        bounceclients = bounce;
+        totalclients = summary.total;
+        pendingclients = summary.pending;
+        approvedclients = summary.approved;
+        rejectedclients = summary.rejected;
+        bounceclients = summary.bounced;
+        _clientStatsLoaded = true;
       });
+    } finally {
+      _summaryUpdateInProgress = false;
     }
+  }
 
-    return {
-      'Approved': approved,
-      'Pending': pending,
-      'Rejected': rejected,
-      'Bounce': bounce,
-      'Total': totalLocal,
-    };
+  String _clientStatLabel(int value) {
+    return _clientStatsLoaded ? value.toString() : "--";
   }
 
   Widget _pill(String value, String label, Color color) {
@@ -1830,11 +1816,23 @@ class _DashboardPageState extends State<DashboardPage> {
           const SizedBox(height: 6),
           Row(
             children: [
-              _pill(totalclients.toString(), "Total", AppColors.secondary),
+              _pill(
+                _clientStatLabel(totalclients),
+                "Total",
+                AppColors.secondary,
+              ),
               const SizedBox(width: 6),
-              _pill(approvedclients.toString(), "Approved", AppColors.success),
+              _pill(
+                _clientStatLabel(approvedclients),
+                "Approved",
+                AppColors.success,
+              ),
               const SizedBox(width: 6),
-              _pill(pendingclients.toString(), "Pending", AppColors.warning),
+              _pill(
+                _clientStatLabel(pendingclients),
+                "Pending",
+                AppColors.warning,
+              ),
             ],
           ),
         ],
@@ -2062,10 +2060,13 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _clientsFunnelCardDashboard() {
-    final int denom = totalclients == 0 ? 1 : totalclients;
+    final int denom = !_clientStatsLoaded || totalclients == 0
+        ? 1
+        : totalclients;
     final double approvedPct = approvedclients / denom;
     final double pendingPct = pendingclients / denom;
     final double otherPct = (1 - approvedPct - pendingPct).clamp(0.0, 1.0);
+    final otherCount = totalclients - approvedclients - pendingclients;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
@@ -2120,11 +2121,17 @@ class _DashboardPageState extends State<DashboardPage> {
             spacing: 12,
             runSpacing: 4,
             children: [
-              _legendItem(AppColors.success, "Approved ($approvedclients)"),
-              _legendItem(AppColors.warning, "Pending ($pendingclients)"),
+              _legendItem(
+                AppColors.success,
+                "Approved (${_clientStatLabel(approvedclients)})",
+              ),
+              _legendItem(
+                AppColors.warning,
+                "Pending (${_clientStatLabel(pendingclients)})",
+              ),
               _legendItem(
                 AppColors.textSecondary.withOpacity(0.7),
-                "Others (${totalclients - approvedclients - pendingclients})",
+                "Others (${_clientStatsLoaded ? otherCount.toString() : "--"})",
               ),
             ],
           ),

@@ -205,8 +205,9 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
           if (createdId == null || createdId.isEmpty) continue;
 
           final rowIdRaw = r['id'];
-          final rowId =
-              rowIdRaw is int ? rowIdRaw : int.tryParse(rowIdRaw.toString());
+          final rowId = rowIdRaw is int
+              ? rowIdRaw
+              : int.tryParse(rowIdRaw.toString());
           if (rowId != null) _analogIdToRow[createdId] = rowId;
         }
       } catch (_) {}
@@ -224,8 +225,9 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
         }
 
         if (parsed is Map<String, dynamic>) {
-          final createdId =
-              (parsed['id_number'] ?? parsed['id'])?.toString().trim();
+          final createdId = (parsed['id_number'] ?? parsed['id'])
+              ?.toString()
+              .trim();
           if (createdId == null || createdId.isEmpty) continue;
 
           if (reg.id != null) _digitalIdToRow[createdId] = reg.id!;
@@ -335,9 +337,8 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
 
         final serverId = item['id']?.toString().trim();
         final serverStatusRaw = item['status']?.toString();
-        if (serverId == null ||
-            serverId.isEmpty ||
-            serverStatusRaw == null) continue;
+        if (serverId == null || serverId.isEmpty || serverStatusRaw == null)
+          continue;
 
         final serverStatus = _normalizeStatus(serverStatusRaw);
         final prior = _statusByServerId[serverId];
@@ -366,7 +367,10 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
         if (analogRowId != null) {
           final currentLocal = _findLocalClientStatusByServerId(serverId);
           if (currentLocal == null || currentLocal != serverStatus) {
-            await DatabaseHelper.instance.updateStatus(analogRowId, serverStatus);
+            await DatabaseHelper.instance.updateStatus(
+              analogRowId,
+              serverStatus,
+            );
             anyDbChange = true;
           }
         }
@@ -375,8 +379,10 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
         if (digitalLocalId != null) {
           final currentLocal = _findLocalClientStatusByServerId(serverId);
           if (currentLocal == null || currentLocal != serverStatus) {
-            await DigitalRegistrationDb.instance
-                .updateStatus(digitalLocalId, serverStatus);
+            await DigitalRegistrationDb.instance.updateStatus(
+              digitalLocalId,
+              serverStatus,
+            );
             anyDbChange = true;
           }
         }
@@ -428,10 +434,7 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
       if (current == 'draft') continue;
 
       if (current != newStatus) {
-        _clients[i] = {
-          ...c,
-          'status': newStatus,
-        };
+        _clients[i] = {...c, 'status': newStatus};
         changed = true;
       }
     }
@@ -445,11 +448,13 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
     // 1) analog
     final analog = await DatabaseHelper.instance.getData();
     final analogWithSource = analog
-        .map<Map<String, dynamic>>((c) => {
-              ...c,
-              'status': _normalizeStatus(c['status']?.toString()),
-              'source': 'analog',
-            })
+        .map<Map<String, dynamic>>(
+          (c) => {
+            ...c,
+            'status': _normalizeStatus(c['status']?.toString()),
+            'source': 'analog',
+          },
+        )
         .toList();
 
     // 2) digital
@@ -488,8 +493,11 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
           final firstName = (decoded['firstName'] ?? '').toString().trim();
           final surname = (decoded['surname'] ?? '').toString().trim();
 
-          final parts =
-              [title, firstName, surname].where((p) => p.isNotEmpty).toList();
+          final parts = [
+            title,
+            firstName,
+            surname,
+          ].where((p) => p.isNotEmpty).toList();
           if (parts.isNotEmpty) return parts.join(' ');
         }
       } catch (_) {}
@@ -523,21 +531,26 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child:
-                Text("Cancel", style: TextStyle(color: AppColors.textSecondary)),
+            child: Text(
+              "Cancel",
+              style: TextStyle(color: AppColors.textSecondary),
+            ),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
             onPressed: () async {
               if (controller.text.trim().isEmpty) return;
 
-              await DatabaseHelper.instance
-                  .updateData(id, controller.text.trim());
+              await DatabaseHelper.instance.updateData(
+                id,
+                controller.text.trim(),
+              );
               if (!mounted) return;
 
               Navigator.pop(context);
@@ -677,18 +690,22 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
                 ListTile(
                   leading: CircleAvatar(
                     backgroundColor: AppColors.primary.withOpacity(0.1),
-                    child: const Icon(Icons.phone_android,
-                        color: AppColors.primary),
+                    child: const Icon(
+                      Icons.phone_android,
+                      color: AppColors.primary,
+                    ),
                   ),
                   title: const Text("Digital registration"),
-                  subtitle:
-                      const Text("Capture details directly in the application"),
+                  subtitle: const Text(
+                    "Capture details directly in the application",
+                  ),
                   onTap: () {
                     Navigator.pop(context);
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                          builder: (context) => const DigitalSignUp()),
+                        builder: (context) => const DigitalSignUp(),
+                      ),
                     ).then((_) async {
                       await _loadClients();
                       await _rebuildIdMaps();
@@ -784,11 +801,8 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => DigitalClientPreview(
-            data: data,
-            status: status,
-            reason: reason,
-          ),
+          builder: (_) =>
+              DigitalClientPreview(data: data, status: status, reason: reason),
         ),
       ).then((_) {
         _startPolling(immediate: true);
@@ -797,11 +811,8 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => ClientPreview(
-            client: client,
-            status: status,
-            reason: reason,
-          ),
+          builder: (_) =>
+              ClientPreview(client: client, status: status, reason: reason),
         ),
       ).then((_) {
         _startPolling(immediate: true);
@@ -841,10 +852,13 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30)),
+                  borderRadius: BorderRadius.circular(30),
+                ),
               ),
               onPressed: () => _showSignUpOptions(context),
               icon: const Icon(Icons.person_add_outlined),
@@ -919,6 +933,7 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
                   ),
                 ),
                 selected: selected,
+                checkmarkColor: Colors.white,
                 onSelected: (_) => setState(() => _selectedFilter = key),
                 selectedColor: AppColors.primary,
                 backgroundColor: AppColors.cardBackground,
@@ -994,7 +1009,8 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
                     decoration: BoxDecoration(
                       color: AppColors.background,
                       borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(24)),
+                        top: Radius.circular(24),
+                      ),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withOpacity(0.12),
@@ -1022,10 +1038,13 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
                                     const SizedBox(width: 8),
                                     Container(
                                       padding: const EdgeInsets.symmetric(
-                                          horizontal: 10, vertical: 4),
+                                        horizontal: 10,
+                                        vertical: 4,
+                                      ),
                                       decoration: BoxDecoration(
-                                        color:
-                                            AppColors.primary.withOpacity(0.1),
+                                        color: AppColors.primary.withOpacity(
+                                          0.1,
+                                        ),
                                         borderRadius: BorderRadius.circular(12),
                                       ),
                                       child: Text(
@@ -1042,14 +1061,18 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
                                     // ✅ LIVE/ERROR indicator (no spinner)
                                     Container(
                                       padding: const EdgeInsets.symmetric(
-                                          horizontal: 10, vertical: 6),
+                                        horizontal: 10,
+                                        vertical: 6,
+                                      ),
                                       decoration: BoxDecoration(
                                         color: AppColors.cardBackground,
-                                        borderRadius:
-                                            BorderRadius.circular(999),
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
                                         border: Border.all(
-                                          color: AppColors.primary
-                                              .withOpacity(0.06),
+                                          color: AppColors.primary.withOpacity(
+                                            0.06,
+                                          ),
                                         ),
                                       ),
                                       child: Row(
@@ -1092,8 +1115,9 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
                                 Text(
                                   "Tap a client to view details or long press for more options.",
                                   style: TextStyle(
-                                      fontSize: 12,
-                                      color: AppColors.textSecondary),
+                                    fontSize: 12,
+                                    color: AppColors.textSecondary,
+                                  ),
                                 ),
                                 const SizedBox(height: 12),
                                 _buildFilterBar(),
@@ -1112,13 +1136,15 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
                                             return GestureDetector(
                                               onLongPress: () =>
                                                   _showEditDeleteOptions(
-                                                      client),
+                                                    client,
+                                                  ),
                                               onTap: () => _openClient(client),
                                               child: buildClientItem(
                                                 _getClientName(client),
                                                 _getEffectiveStatus(client),
-                                                reason:
-                                                    _getReasonForClient(client),
+                                                reason: _getReasonForClient(
+                                                  client,
+                                                ),
                                               ),
                                             );
                                           },
@@ -1241,7 +1267,10 @@ Widget buildClientItem(String name, String statusRaw, {String? reason}) {
                   "Status: $label",
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.textSecondary,
+                  ),
                 ),
                 if ((status == 'rejected' ||
                         status == 'bounced' ||
@@ -1253,8 +1282,10 @@ Widget buildClientItem(String name, String statusRaw, {String? reason}) {
                     "Reason: ${reason.trim()}",
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style:
-                        TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppColors.textSecondary,
+                    ),
                   ),
                 ],
               ],
@@ -1265,8 +1296,10 @@ Widget buildClientItem(String name, String statusRaw, {String? reason}) {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Container(
-                padding:
-                    const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 4,
+                  horizontal: 10,
+                ),
                 decoration: BoxDecoration(
                   color: statusColor.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(20),

@@ -2,10 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:pfs_agent/layouts/Colors.dart';
+import 'package:pfs_agent/services/client_status_summary_service.dart';
 
 import 'TargetsService.dart';
-import 'database/digital_registration_db.dart';
-import 'database_helper.dart';
 
 class Statistics extends StatefulWidget {
   const Statistics({super.key});
@@ -16,6 +15,10 @@ class Statistics extends StatefulWidget {
 
 class _StatisticsState extends State<Statistics> {
   late TargetsService _targetsService;
+  final ClientStatusSummaryService _summaryService =
+      const ClientStatusSummaryService();
+  Timer? _summaryTimer;
+  bool _summaryUpdateInProgress = false;
 
   // ================== TARGETS / SUMMARY ==================
   String _category = "---";
@@ -54,8 +57,7 @@ class _StatisticsState extends State<Statistics> {
   int approvedclients = 0;
   int rejectedclients = 0;
   int bounceclients = 0;
-
-  late Future<Map<String, int>> _statsFuture;
+  bool _clientStatsLoaded = false;
 
   // ================= SAFE INT PARSER =================
   int _toInt(dynamic v) {
@@ -101,6 +103,19 @@ class _StatisticsState extends State<Statistics> {
     if (pct < 50) return Colors.red;
     if (pct < 80) return Colors.amber;
     return Colors.green;
+  }
+
+  void _applyClientSummary(ClientStatusSummary summary) {
+    totalclients = summary.total;
+    pendingclients = summary.pending;
+    approvedclients = summary.approved;
+    rejectedclients = summary.rejected;
+    bounceclients = summary.bounced;
+    _clientStatsLoaded = true;
+  }
+
+  String _clientStatLabel(int value) {
+    return _clientStatsLoaded ? value.toString() : "--";
   }
 
   // ================= TARGETS SERVICE =================
@@ -239,68 +254,37 @@ class _StatisticsState extends State<Statistics> {
   }
 
   // ================= COMBINED STATS =================
-  Future<Map<String, int>> _getCombinedStats() async {
-    int approved = 0;
-    int rejected = 0;
-    int bounce = 0;
-    int pending = 0;
-    int totalLocal = 0;
+  Future<void> _getCombinedStats() async {
+    if (_summaryUpdateInProgress) return;
+    _summaryUpdateInProgress = true;
 
-    final db1List = await DigitalRegistrationDb.instance.getAll();
-    for (var item in db1List) {
-      final s = item.status.toLowerCase();
-      if (s == 'approved') {
-        approved++;
-      } else if (s == 'pending') {
-        pending++;
-      } else if (s == 'rejected' || s == 'denied') {
-        rejected++;
-      } else if (s == 'bounce') {
-        bounce++;
-      }
-    }
+    try {
+      final summary = await _summaryService.fetchSummary();
+      if (!mounted || summary == null) return;
 
-    final db2List = await DatabaseHelper.instance.getData();
-    for (var item in db2List) {
-      final s = (item[DatabaseHelper.columnStatus] as String? ?? '')
-          .toLowerCase();
-      if (s == 'approved') {
-        approved++;
-      } else if (s == 'pending') {
-        pending++;
-      } else if (s == 'rejected' || s == 'denied') {
-        rejected++;
-      } else if (s == 'bounce') {
-        bounce++;
-      }
-    }
-
-    totalLocal = db1List.length + db2List.length;
-
-    if (mounted) {
       setState(() {
-        totalclients = approved + pending + rejected + bounce;
-        pendingclients = pending;
-        approvedclients = approved;
-        rejectedclients = rejected;
-        bounceclients = bounce;
+        _applyClientSummary(summary);
       });
+    } finally {
+      _summaryUpdateInProgress = false;
     }
-
-    return {
-      'Approved': approved,
-      'Pending': pending,
-      'Rejected': rejected,
-      'Bounce': bounce,
-      'Total': totalLocal,
-    };
   }
 
   @override
   void initState() {
     super.initState();
 
-    _statsFuture = _getCombinedStats();
+    _summaryService.getCachedSummary().then((summary) {
+      if (!mounted || summary == null) return;
+      setState(() {
+        _applyClientSummary(summary);
+      });
+    });
+
+    _getCombinedStats();
+    _summaryTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _getCombinedStats();
+    });
 
     // show "--" until service loads
     _progressPct.value = null;
@@ -310,6 +294,7 @@ class _StatisticsState extends State<Statistics> {
 
   @override
   void dispose() {
+    _summaryTimer?.cancel();
     _progressPct.dispose();
     super.dispose();
   }
@@ -765,11 +750,23 @@ class _StatisticsState extends State<Statistics> {
           const SizedBox(height: 6),
           Row(
             children: [
-              _pill(totalclients.toString(), "Total", AppColors.secondary),
+              _pill(
+                _clientStatLabel(totalclients),
+                "Total",
+                AppColors.secondary,
+              ),
               const SizedBox(width: 6),
-              _pill(approvedclients.toString(), "Approved", AppColors.success),
+              _pill(
+                _clientStatLabel(approvedclients),
+                "Approved",
+                AppColors.success,
+              ),
               const SizedBox(width: 6),
-              _pill(pendingclients.toString(), "Pending", AppColors.warning),
+              _pill(
+                _clientStatLabel(pendingclients),
+                "Pending",
+                AppColors.warning,
+              ),
             ],
           ),
         ],
@@ -917,10 +914,13 @@ class _StatisticsState extends State<Statistics> {
 
   // ================= CLIENTS FUNNEL =================
   Widget _buildClientsFunnelCard() {
-    final int denom = totalclients == 0 ? 1 : totalclients;
+    final int denom = !_clientStatsLoaded || totalclients == 0
+        ? 1
+        : totalclients;
     final double approvedPct = approvedclients / denom;
     final double pendingPct = pendingclients / denom;
     final double otherPct = (1 - approvedPct - pendingPct).clamp(0.0, 1.0);
+    final otherCount = totalclients - approvedclients - pendingclients;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
@@ -975,11 +975,17 @@ class _StatisticsState extends State<Statistics> {
             spacing: 12,
             runSpacing: 4,
             children: [
-              _legendItem(AppColors.success, "Approved ($approvedclients)"),
-              _legendItem(AppColors.warning, "Pending ($pendingclients)"),
+              _legendItem(
+                AppColors.success,
+                "Approved (${_clientStatLabel(approvedclients)})",
+              ),
+              _legendItem(
+                AppColors.warning,
+                "Pending (${_clientStatLabel(pendingclients)})",
+              ),
               _legendItem(
                 AppColors.textSecondary.withOpacity(0.7),
-                "Others (${totalclients - approvedclients - pendingclients})",
+                "Others (${_clientStatsLoaded ? otherCount.toString() : "--"})",
               ),
             ],
           ),
