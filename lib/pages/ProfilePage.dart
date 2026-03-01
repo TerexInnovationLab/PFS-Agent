@@ -121,7 +121,7 @@ class ProfilePageState extends State<ProfilePage> {
       'September',
       'October',
       'November',
-      'December'
+      'December',
     ];
 
     final day = dt.day.toString();
@@ -140,15 +140,20 @@ class ProfilePageState extends State<ProfilePage> {
     if (_isUploadingImage) return;
 
     final hasLocal = _profileImage != null;
-    final hasNet = (_profileImageUrl != null && _profileImageUrl!.trim().isNotEmpty);
+    final hasNet =
+        (_profileImageUrl != null && _profileImageUrl!.trim().isNotEmpty);
 
     if (!hasLocal && !hasNet) return;
 
     // cache-bust network url when showing preview
     final String? netUrl = hasNet
-        ? Uri.parse(_profileImageUrl!).replace(queryParameters: {
-            "v": DateTime.now().millisecondsSinceEpoch.toString(),
-          }).toString()
+        ? Uri.parse(_profileImageUrl!)
+              .replace(
+                queryParameters: {
+                  "v": DateTime.now().millisecondsSinceEpoch.toString(),
+                },
+              )
+              .toString()
         : null;
 
     showDialog(
@@ -186,7 +191,10 @@ class ProfilePageState extends State<ProfilePage> {
         // transparent background + image + Close button (no fullscreen overlay)
         return Dialog(
           backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -220,7 +228,10 @@ class ProfilePageState extends State<ProfilePage> {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString('token');
     if (raw == null) return null;
-    return raw.trim().replaceFirst(RegExp(r'^Bearer\s+', caseSensitive: false), '');
+    return raw.trim().replaceFirst(
+      RegExp(r'^Bearer\s+', caseSensitive: false),
+      '',
+    );
   }
 
   // ================= LOCAL SAVED IMAGE =================
@@ -261,14 +272,17 @@ class ProfilePageState extends State<ProfilePage> {
 
     if (decoded is! Map<String, dynamic>) return;
 
-    final Map<String, dynamic> user =
-        (decoded['user'] is Map<String, dynamic>) ? decoded['user'] : decoded;
+    final Map<String, dynamic> user = (decoded['user'] is Map<String, dynamic>)
+        ? decoded['user']
+        : decoded;
 
-    final Map<String, dynamic>? agent =
-        (user['agent'] is Map<String, dynamic>) ? user['agent'] : null;
+    final Map<String, dynamic>? agent = (user['agent'] is Map<String, dynamic>)
+        ? user['agent']
+        : null;
 
     setState(() {
-      _userName = "${user['first_name'] ?? ''} ${user['last_name'] ?? ''}".trim();
+      _userName = "${user['first_name'] ?? ''} ${user['last_name'] ?? ''}"
+          .trim();
       _userEmail = user['email']?.toString();
       _userPhone = user['phone']?.toString();
 
@@ -341,7 +355,9 @@ class ProfilePageState extends State<ProfilePage> {
 
   // ================= API: UPLOAD PROFILE IMAGE =================
   Future<void> _pickAndUploadImage() async {
-    final XFile? pickedFile = await _picker.pickImage(source: ImageSource.gallery);
+    final XFile? pickedFile = await _picker.pickImage(
+      source: ImageSource.gallery,
+    );
     if (pickedFile == null) return;
 
     final file = File(pickedFile.path);
@@ -368,9 +384,13 @@ class ProfilePageState extends State<ProfilePage> {
         "Authorization": "Bearer $token",
       });
 
-      request.files.add(await http.MultipartFile.fromPath("profile_image", file.path));
+      request.files.add(
+        await http.MultipartFile.fromPath("profile_image", file.path),
+      );
 
-      final streamed = await request.send().timeout(const Duration(seconds: 30));
+      final streamed = await request.send().timeout(
+        const Duration(seconds: 30),
+      );
       final response = await http.Response.fromStream(streamed);
 
       if (response.statusCode == 200) {
@@ -414,7 +434,8 @@ class ProfilePageState extends State<ProfilePage> {
       ),
     );
     Future.delayed(const Duration(seconds: 2), () {
-      if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
+      if (mounted && Navigator.of(context).canPop())
+        Navigator.of(context).pop();
     });
   }
 
@@ -441,7 +462,8 @@ class ProfilePageState extends State<ProfilePage> {
 
     final db2List = await DatabaseHelper.instance.getData();
     for (var item in db2List) {
-      final s = (item[DatabaseHelper.columnStatus] as String? ?? '').toLowerCase();
+      final s = (item[DatabaseHelper.columnStatus] as String? ?? '')
+          .toLowerCase();
       if (s == 'approved') {
         approved++;
       } else if (s == 'pending') {
@@ -520,10 +542,13 @@ class ProfilePageState extends State<ProfilePage> {
 
       if (decoded is Map<String, dynamic>) {
         final Map<String, dynamic> user =
-            (decoded['user'] is Map<String, dynamic>) ? decoded['user'] : decoded;
+            (decoded['user'] is Map<String, dynamic>)
+            ? decoded['user']
+            : decoded;
 
         setState(() {
-          _userName = "${user['first_name'] ?? ''} ${user['last_name'] ?? ''}".trim();
+          _userName = "${user['first_name'] ?? ''} ${user['last_name'] ?? ''}"
+              .trim();
           _userEmail = user['email']?.toString();
           _userPhone = user['phone']?.toString();
 
@@ -607,7 +632,9 @@ class ProfilePageState extends State<ProfilePage> {
                   child: Container(
                     decoration: BoxDecoration(
                       color: AppColors.background,
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(24),
+                      ),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withOpacity(0.12),
@@ -667,11 +694,20 @@ class ProfilePageState extends State<ProfilePage> {
     Widget avatar;
 
     if (_profileImage != null) {
-      avatar = Image.file(_profileImage!, width: 64, height: 64, fit: BoxFit.cover);
+      avatar = Image.file(
+        _profileImage!,
+        width: 64,
+        height: 64,
+        fit: BoxFit.cover,
+      );
     } else if (_profileImageUrl != null && _profileImageUrl!.isNotEmpty) {
-      final bustedUrl = Uri.parse(_profileImageUrl!).replace(queryParameters: {
-        "v": DateTime.now().millisecondsSinceEpoch.toString(),
-      }).toString();
+      final bustedUrl = Uri.parse(_profileImageUrl!)
+          .replace(
+            queryParameters: {
+              "v": DateTime.now().millisecondsSinceEpoch.toString(),
+            },
+          )
+          .toString();
 
       avatar = Image.network(
         bustedUrl,
@@ -709,7 +745,10 @@ class ProfilePageState extends State<ProfilePage> {
                 child: SizedBox(
                   width: 18,
                   height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ),
@@ -787,7 +826,10 @@ class ProfilePageState extends State<ProfilePage> {
                     const SizedBox(height: 2),
                     Text(
                       "Agent ID: ${_userId ?? '---'}",
-                      style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
                     ),
                     const SizedBox(height: 6),
                     Row(
@@ -807,7 +849,11 @@ class ProfilePageState extends State<ProfilePage> {
           const SizedBox(height: 10),
           Row(
             children: [
-              Icon(Icons.phone_outlined, size: 18, color: AppColors.textSecondary),
+              Icon(
+                Icons.phone_outlined,
+                size: 18,
+                color: AppColors.textSecondary,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -820,7 +866,11 @@ class ProfilePageState extends State<ProfilePage> {
           const SizedBox(height: 6),
           Row(
             children: [
-              Icon(Icons.email_outlined, size: 18, color: AppColors.textSecondary),
+              Icon(
+                Icons.email_outlined,
+                size: 18,
+                color: AppColors.textSecondary,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -848,7 +898,10 @@ class ProfilePageState extends State<ProfilePage> {
                 },
                 style: TextButton.styleFrom(
                   foregroundColor: AppColors.primary,
-                  textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                  textStyle: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
                 child: Text(_showMoreDetails ? 'Less Details' : 'More Details'),
               ),
@@ -860,8 +913,9 @@ class ProfilePageState extends State<ProfilePage> {
               padding: const EdgeInsets.only(top: 10),
               child: _moreDetailsSection(),
             ),
-            crossFadeState:
-                _showMoreDetails ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+            crossFadeState: _showMoreDetails
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
             duration: const Duration(milliseconds: 200),
           ),
         ],
@@ -873,28 +927,68 @@ class ProfilePageState extends State<ProfilePage> {
   Widget _moreDetailsSection() {
     return Column(
       children: [
-        _detailRow(Icons.person_2_outlined, "Gender: ${_profileGender ?? '---'}"),
+        _detailRow(
+          Icons.person_2_outlined,
+          "Gender: ${_profileGender ?? '---'}",
+        ),
         _detailRow(Icons.badge_outlined, "ID Type: ${_profileIdType ?? '---'}"),
-        _detailRow(Icons.badge_outlined, "ID Type No.: ${_profileIdNumber ?? '---'}"),
-        _detailRow(Icons.family_restroom_outlined,
-            "Marital Status: ${_profileMaritalStatus ?? '---'}"),
-        _detailRow(Icons.date_range_outlined, "Date Joined: ${_formatDate(_profileDateJoined)}"),
-        _detailRow(Icons.date_range_rounded, "Date of Birth: ${_formatDate(_profileDateOfBirth)}"),
-        _detailRow(Icons.local_post_office_outlined,
-            "Postal Address: ${_profilePostalAddress ?? '---'}"),
-        _detailRow(Icons.numbers_rounded, "Postal Code: ${_profilePostalCode ?? '---'}"),
-        _detailRow(Icons.location_city_outlined, "Postal Town: ${_profilePostalTown ?? '---'}"),
-        _detailRow(Icons.verified_user_outlined,
-            "Email verified at: ${_formatDate(_emailVerifiedAt)}"),
-        _detailRow(Icons.timer_outlined, "Created at: ${_formatDate(_createdAt)}"),
-        _detailRow(Icons.timer_outlined, "Updated at: ${_formatDate(_updatedAt)}"),
-        _detailRow(Icons.account_balance,
-            "Bank Name: ${_bankAccountName ?? _userBank ?? '---'}"),
-        _detailRow(Icons.account_balance_wallet_outlined,
-            "Acc No.: ${_bankAccountNumber ?? '---'}"),
-        _detailRow(Icons.account_balance_outlined, "Branch: ${_branch ?? '---'}"),
+        _detailRow(
+          Icons.badge_outlined,
+          "ID Type No.: ${_profileIdNumber ?? '---'}",
+        ),
+        _detailRow(
+          Icons.family_restroom_outlined,
+          "Marital Status: ${_profileMaritalStatus ?? '---'}",
+        ),
+        _detailRow(
+          Icons.date_range_outlined,
+          "Date Joined: ${_formatDate(_profileDateJoined)}",
+        ),
+        _detailRow(
+          Icons.date_range_rounded,
+          "Date of Birth: ${_formatDate(_profileDateOfBirth)}",
+        ),
+        _detailRow(
+          Icons.local_post_office_outlined,
+          "Postal Address: ${_profilePostalAddress ?? '---'}",
+        ),
+        _detailRow(
+          Icons.numbers_rounded,
+          "Postal Code: ${_profilePostalCode ?? '---'}",
+        ),
+        _detailRow(
+          Icons.location_city_outlined,
+          "Postal Town: ${_profilePostalTown ?? '---'}",
+        ),
+        _detailRow(
+          Icons.verified_user_outlined,
+          "Email verified at: ${_formatDate(_emailVerifiedAt)}",
+        ),
+        _detailRow(
+          Icons.timer_outlined,
+          "Created at: ${_formatDate(_createdAt)}",
+        ),
+        _detailRow(
+          Icons.timer_outlined,
+          "Updated at: ${_formatDate(_updatedAt)}",
+        ),
+        _detailRow(
+          Icons.account_balance,
+          "Bank Name: ${_bankAccountName ?? _userBank ?? '---'}",
+        ),
+        _detailRow(
+          Icons.account_balance_wallet_outlined,
+          "Acc No.: ${_bankAccountNumber ?? '---'}",
+        ),
+        _detailRow(
+          Icons.account_balance_outlined,
+          "Branch: ${_branch ?? '---'}",
+        ),
         _detailRow(Icons.map, "Region: ${_region ?? _userRegion ?? '---'}"),
-        _detailRow(Icons.check_circle, "Status: ${_agentStatus ?? _userStatus ?? '---'}"),
+        _detailRow(
+          Icons.check_circle,
+          "Status: ${_agentStatus ?? _userStatus ?? '---'}",
+        ),
         _detailRow(Icons.work_outline, "Role: ${_profileRole ?? '---'}"),
       ],
     );
@@ -927,6 +1021,7 @@ class ProfilePageState extends State<ProfilePage> {
   Future<bool?> _showDetailsPasswordDialog() async {
     final TextEditingController passwordController = TextEditingController();
     String? errorText;
+    bool isPasswordVisible = false;
 
     return showDialog<bool>(
       context: context,
@@ -969,7 +1064,10 @@ class ProfilePageState extends State<ProfilePage> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(18),
               ),
-              insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 24,
+              ),
               titlePadding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
               contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
               actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -1016,7 +1114,7 @@ class ProfilePageState extends State<ProfilePage> {
                   TextField(
                     controller: passwordController,
                     autofocus: true,
-                    obscureText: true,
+                    obscureText: !isPasswordVisible,
                     enabled: !_unlockingDetails,
                     cursorColor: AppColors.primary,
                     decoration: InputDecoration(
@@ -1061,6 +1159,20 @@ class ProfilePageState extends State<ProfilePage> {
                           width: 1.4,
                         ),
                       ),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          isPasswordVisible
+                              ? Icons.visibility
+                              : Icons.visibility_off,
+                          size: 18,
+                          color: AppColors.textSecondary,
+                        ),
+                        onPressed: _unlockingDetails
+                            ? null
+                            : () => setStateDialog(
+                                () => isPasswordVisible = !isPasswordVisible,
+                              ),
+                      ),
                     ),
                     onSubmitted: (_) => unlockAndLoad(),
                   ),
@@ -1075,7 +1187,9 @@ class ProfilePageState extends State<ProfilePage> {
                               SizedBox(
                                 height: 16,
                                 width: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               ),
                               SizedBox(width: 10),
                               Expanded(
@@ -1095,7 +1209,9 @@ class ProfilePageState extends State<ProfilePage> {
               ),
               actions: [
                 TextButton(
-                  onPressed: _unlockingDetails ? null : () => Navigator.of(context).pop(false),
+                  onPressed: _unlockingDetails
+                      ? null
+                      : () => Navigator.of(context).pop(false),
                   style: TextButton.styleFrom(
                     foregroundColor: AppColors.textSecondary,
                     textStyle: const TextStyle(
@@ -1113,7 +1229,10 @@ class ProfilePageState extends State<ProfilePage> {
                     disabledBackgroundColor: Colors.grey.shade400,
                     disabledForegroundColor: Colors.white,
                     elevation: 0,
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 10,
+                    ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
                     ),
@@ -1254,7 +1373,10 @@ class ProfilePageState extends State<ProfilePage> {
               ),
             ),
             const SizedBox(height: 2),
-            Text(label, style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+            Text(
+              label,
+              style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+            ),
           ],
         ),
       ),
@@ -1282,7 +1404,9 @@ class ProfilePageState extends State<ProfilePage> {
           onTap: () {
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (context) => const Createnewpasswordpage()),
+              MaterialPageRoute(
+                builder: (context) => const Createnewpasswordpage(),
+              ),
             );
           },
         ),
@@ -1307,7 +1431,9 @@ class ProfilePageState extends State<ProfilePage> {
           decoration: BoxDecoration(
             color: AppColors.cardBackground,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.textSecondary.withOpacity(0.08)),
+            border: Border.all(
+              color: AppColors.textSecondary.withOpacity(0.08),
+            ),
           ),
           child: Row(
             children: [
@@ -1338,7 +1464,10 @@ class ProfilePageState extends State<ProfilePage> {
                       subtitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textSecondary,
+                      ),
                     ),
                   ],
                 ),
@@ -1365,7 +1494,9 @@ class ProfilePageState extends State<ProfilePage> {
           side: BorderSide(color: AppColors.danger.withOpacity(0.9)),
           foregroundColor: AppColors.danger,
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
         ),
         icon: const Icon(Icons.logout),

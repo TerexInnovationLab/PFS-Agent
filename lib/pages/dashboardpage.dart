@@ -51,7 +51,8 @@ class _DashboardPageState extends State<DashboardPage> {
   int total = 0; // commission + mid + end
 
   // ✅ single source-of-truth total (prevents mismatches anywhere in UI)
-  int get _totalEarnings => _commission + _transportMidAmount + _transportEndAmount;
+  int get _totalEarnings =>
+      _commission + _transportMidAmount + _transportEndAmount;
 
   int totalclients = 0;
   int pendingclients = 0;
@@ -160,7 +161,7 @@ class _DashboardPageState extends State<DashboardPage> {
       'September',
       'October',
       'November',
-      'December'
+      'December',
     ];
 
     final day = dt.day.toString();
@@ -237,12 +238,14 @@ class _DashboardPageState extends State<DashboardPage> {
 
       if (decoded is Map<String, dynamic>) {
         final Map<String, dynamic> user =
-            (decoded['user'] is Map<String, dynamic>) ? decoded['user'] : decoded;
+            (decoded['user'] is Map<String, dynamic>)
+            ? decoded['user']
+            : decoded;
 
         if (!mounted) return;
         setState(() {
-          _userName =
-              "${user['first_name'] ?? ''} ${user['last_name'] ?? ''}".trim();
+          _userName = "${user['first_name'] ?? ''} ${user['last_name'] ?? ''}"
+              .trim();
           _userEmail = user['email']?.toString();
           _userPhone = user['phone']?.toString();
 
@@ -274,17 +277,19 @@ class _DashboardPageState extends State<DashboardPage> {
 
     if (decoded is! Map<String, dynamic>) return;
 
-    final Map<String, dynamic> user =
-        (decoded['user'] is Map<String, dynamic>) ? decoded['user'] : decoded;
+    final Map<String, dynamic> user = (decoded['user'] is Map<String, dynamic>)
+        ? decoded['user']
+        : decoded;
 
-    final Map<String, dynamic>? agent =
-        (user['agent'] is Map<String, dynamic>) ? user['agent'] : null;
+    final Map<String, dynamic>? agent = (user['agent'] is Map<String, dynamic>)
+        ? user['agent']
+        : null;
 
     if (!mounted) return;
 
     setState(() {
-      _userName =
-          "${user['first_name'] ?? ''} ${user['last_name'] ?? ''}".trim();
+      _userName = "${user['first_name'] ?? ''} ${user['last_name'] ?? ''}"
+          .trim();
       _userEmail = user['email']?.toString();
       _userPhone = user['phone']?.toString();
 
@@ -378,7 +383,8 @@ class _DashboardPageState extends State<DashboardPage> {
           }
 
           // END (support several possible keys)
-          final endMonth = transport['end_month'] ??
+          final endMonth =
+              transport['end_month'] ??
               transport['end'] ??
               transport['month_end'] ??
               transport['end_month_amount'];
@@ -490,6 +496,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<bool?> _showPasswordDialog() async {
     final TextEditingController _passwordController = TextEditingController();
     String? errorText;
+    bool isPasswordVisible = false;
 
     return showDialog<bool>(
       context: context,
@@ -502,8 +509,10 @@ class _DashboardPageState extends State<DashboardPage> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(18),
               ),
-              insetPadding:
-                  const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 24,
+              ),
               titlePadding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
               contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
               actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -539,24 +548,30 @@ class _DashboardPageState extends State<DashboardPage> {
                 children: [
                   const Text(
                     'Enter your password to view the earnings summary.',
-                    style:
-                        TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: AppColors.textSecondary,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: _passwordController,
-                    obscureText: true,
+                    obscureText: !isPasswordVisible,
                     cursorColor: AppColors.primary,
                     decoration: InputDecoration(
                       labelText: 'Password',
                       labelStyle: const TextStyle(
-                          fontSize: 13, color: AppColors.textSecondary),
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                      ),
                       isDense: true,
                       errorText: errorText,
                       filled: true,
                       fillColor: AppColors.background,
                       contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide(
@@ -567,17 +582,35 @@ class _DashboardPageState extends State<DashboardPage> {
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: const BorderSide(
-                            color: AppColors.primary, width: 1.4),
+                          color: AppColors.primary,
+                          width: 1.4,
+                        ),
                       ),
                       errorBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: const BorderSide(
-                            color: AppColors.danger, width: 1.4),
+                          color: AppColors.danger,
+                          width: 1.4,
+                        ),
                       ),
                       focusedErrorBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: const BorderSide(
-                            color: AppColors.danger, width: 1.4),
+                          color: AppColors.danger,
+                          width: 1.4,
+                        ),
+                      ),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          isPasswordVisible
+                              ? Icons.visibility
+                              : Icons.visibility_off,
+                          size: 18,
+                          color: AppColors.textSecondary,
+                        ),
+                        onPressed: () => setStateDialog(
+                          () => isPasswordVisible = !isPasswordVisible,
+                        ),
                       ),
                     ),
                   ),
@@ -590,7 +623,9 @@ class _DashboardPageState extends State<DashboardPage> {
                   style: TextButton.styleFrom(
                     foregroundColor: AppColors.textSecondary,
                     textStyle: const TextStyle(
-                        fontWeight: FontWeight.w500, fontSize: 13),
+                      fontWeight: FontWeight.w500,
+                      fontSize: 13,
+                    ),
                   ),
                   child: const Text('Cancel'),
                 ),
@@ -609,11 +644,16 @@ class _DashboardPageState extends State<DashboardPage> {
                     foregroundColor: Colors.white,
                     elevation: 0,
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 18, vertical: 10),
+                      horizontal: 18,
+                      vertical: 10,
+                    ),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
                     textStyle: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 13),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
                   ),
                   child: const Text('Unlock'),
                 ),
@@ -628,6 +668,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<bool?> _showPasswordDialog2() async {
     final TextEditingController _passwordController = TextEditingController();
     String? errorText;
+    bool isPasswordVisible = false;
 
     return showDialog<bool>(
       context: context,
@@ -640,8 +681,10 @@ class _DashboardPageState extends State<DashboardPage> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(18),
               ),
-              insetPadding:
-                  const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 24,
+              ),
               titlePadding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
               contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
               actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -677,24 +720,30 @@ class _DashboardPageState extends State<DashboardPage> {
                 children: [
                   const Text(
                     'Enter your password to view your Statistics.',
-                    style:
-                        TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: AppColors.textSecondary,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: _passwordController,
-                    obscureText: true,
+                    obscureText: !isPasswordVisible,
                     cursorColor: AppColors.primary,
                     decoration: InputDecoration(
                       labelText: 'Password',
                       labelStyle: const TextStyle(
-                          fontSize: 13, color: AppColors.textSecondary),
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                      ),
                       isDense: true,
                       errorText: errorText,
                       filled: true,
                       fillColor: AppColors.background,
                       contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide(
@@ -705,17 +754,35 @@ class _DashboardPageState extends State<DashboardPage> {
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: const BorderSide(
-                            color: AppColors.primary, width: 1.4),
+                          color: AppColors.primary,
+                          width: 1.4,
+                        ),
                       ),
                       errorBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: const BorderSide(
-                            color: AppColors.danger, width: 1.4),
+                          color: AppColors.danger,
+                          width: 1.4,
+                        ),
                       ),
                       focusedErrorBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: const BorderSide(
-                            color: AppColors.danger, width: 1.4),
+                          color: AppColors.danger,
+                          width: 1.4,
+                        ),
+                      ),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          isPasswordVisible
+                              ? Icons.visibility
+                              : Icons.visibility_off,
+                          size: 18,
+                          color: AppColors.textSecondary,
+                        ),
+                        onPressed: () => setStateDialog(
+                          () => isPasswordVisible = !isPasswordVisible,
+                        ),
                       ),
                     ),
                   ),
@@ -728,7 +795,9 @@ class _DashboardPageState extends State<DashboardPage> {
                   style: TextButton.styleFrom(
                     foregroundColor: AppColors.textSecondary,
                     textStyle: const TextStyle(
-                        fontWeight: FontWeight.w500, fontSize: 13),
+                      fontWeight: FontWeight.w500,
+                      fontSize: 13,
+                    ),
                   ),
                   child: const Text('Cancel'),
                 ),
@@ -751,11 +820,16 @@ class _DashboardPageState extends State<DashboardPage> {
                     foregroundColor: Colors.white,
                     elevation: 0,
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 18, vertical: 10),
+                      horizontal: 18,
+                      vertical: 10,
+                    ),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
                     textStyle: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 13),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
                   ),
                   child: const Text('Unlock'),
                 ),
@@ -774,6 +848,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<bool?> _showDetailsPasswordDialogDashboard() async {
     final TextEditingController passwordController = TextEditingController();
     String? errorText;
+    bool isPasswordVisible = false;
 
     return showDialog<bool>(
       context: context,
@@ -814,9 +889,12 @@ class _DashboardPageState extends State<DashboardPage> {
             return AlertDialog(
               backgroundColor: AppColors.cardBackground,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18)),
-              insetPadding:
-                  const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 24,
+              ),
               titlePadding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
               contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
               actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -829,8 +907,11 @@ class _DashboardPageState extends State<DashboardPage> {
                       color: AppColors.primary.withOpacity(0.12),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.lock_outline,
-                        size: 18, color: AppColors.primary),
+                    child: const Icon(
+                      Icons.lock_outline,
+                      size: 18,
+                      color: AppColors.primary,
+                    ),
                   ),
                   const SizedBox(width: 10),
                   const Expanded(
@@ -851,26 +932,32 @@ class _DashboardPageState extends State<DashboardPage> {
                 children: [
                   const Text(
                     'Enter your password to view more details.',
-                    style:
-                        TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: AppColors.textSecondary,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: passwordController,
                     autofocus: true,
-                    obscureText: true,
+                    obscureText: !isPasswordVisible,
                     enabled: !_unlockingDetails,
                     cursorColor: AppColors.primary,
                     decoration: InputDecoration(
                       labelText: 'Password',
                       labelStyle: const TextStyle(
-                          fontSize: 13, color: AppColors.textSecondary),
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                      ),
                       isDense: true,
                       errorText: errorText,
                       filled: true,
                       fillColor: AppColors.background,
                       contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide(
@@ -881,17 +968,37 @@ class _DashboardPageState extends State<DashboardPage> {
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: const BorderSide(
-                            color: AppColors.primary, width: 1.4),
+                          color: AppColors.primary,
+                          width: 1.4,
+                        ),
                       ),
                       errorBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: const BorderSide(
-                            color: AppColors.danger, width: 1.4),
+                          color: AppColors.danger,
+                          width: 1.4,
+                        ),
                       ),
                       focusedErrorBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: const BorderSide(
-                            color: AppColors.danger, width: 1.4),
+                          color: AppColors.danger,
+                          width: 1.4,
+                        ),
+                      ),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          isPasswordVisible
+                              ? Icons.visibility
+                              : Icons.visibility_off,
+                          size: 18,
+                          color: AppColors.textSecondary,
+                        ),
+                        onPressed: _unlockingDetails
+                            ? null
+                            : () => setStateDialog(
+                                () => isPasswordVisible = !isPasswordVisible,
+                              ),
                       ),
                     ),
                     onSubmitted: (_) => unlockAndLoad(),
@@ -905,15 +1012,18 @@ class _DashboardPageState extends State<DashboardPage> {
                               SizedBox(
                                 height: 16,
                                 width: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               ),
                               SizedBox(width: 10),
                               Expanded(
                                 child: Text(
                                   "Loading... your details",
                                   style: TextStyle(
-                                      fontSize: 12,
-                                      color: AppColors.textSecondary),
+                                    fontSize: 12,
+                                    color: AppColors.textSecondary,
+                                  ),
                                 ),
                               ),
                             ],
@@ -930,7 +1040,9 @@ class _DashboardPageState extends State<DashboardPage> {
                   style: TextButton.styleFrom(
                     foregroundColor: AppColors.textSecondary,
                     textStyle: const TextStyle(
-                        fontWeight: FontWeight.w500, fontSize: 13),
+                      fontWeight: FontWeight.w500,
+                      fontSize: 13,
+                    ),
                   ),
                   child: const Text('Cancel'),
                 ),
@@ -943,11 +1055,16 @@ class _DashboardPageState extends State<DashboardPage> {
                     disabledForegroundColor: Colors.white,
                     elevation: 0,
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 18, vertical: 10),
+                      horizontal: 18,
+                      vertical: 10,
+                    ),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
                     textStyle: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 13),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
                   ),
                   child: const Text('Unlock'),
                 ),
@@ -988,8 +1105,10 @@ class _DashboardPageState extends State<DashboardPage> {
 
             return Dialog(
               backgroundColor: Colors.transparent,
-              insetPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 24,
+              ),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 460),
                 child: Container(
@@ -1031,16 +1150,19 @@ class _DashboardPageState extends State<DashboardPage> {
                                   Text(
                                     "Agent ID: ${_userId ?? '---'}",
                                     style: TextStyle(
-                                        fontSize: 12,
-                                        color: AppColors.textSecondary),
+                                      fontSize: 12,
+                                      color: AppColors.textSecondary,
+                                    ),
                                   ),
                                   const SizedBox(height: 6),
                                   Row(
                                     children: [
                                       _chip(_category, Icons.verified_rounded),
                                       const SizedBox(width: 6),
-                                      _chip(_userRegion ?? "---",
-                                          Icons.location_on_outlined),
+                                      _chip(
+                                        _userRegion ?? "---",
+                                        Icons.location_on_outlined,
+                                      ),
                                     ],
                                   ),
                                 ],
@@ -1062,10 +1184,13 @@ class _DashboardPageState extends State<DashboardPage> {
                             style: TextButton.styleFrom(
                               foregroundColor: AppColors.primary,
                               textStyle: const TextStyle(
-                                  fontSize: 12, fontWeight: FontWeight.w500),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
-                            child:
-                                Text(showMore ? "Less Details" : "More Details"),
+                            child: Text(
+                              showMore ? "Less Details" : "More Details",
+                            ),
                           ),
                         ),
                         AnimatedCrossFade(
@@ -1100,9 +1225,10 @@ class _DashboardPageState extends State<DashboardPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label,
-                  style:
-                      TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+              Text(
+                label,
+                style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+              ),
               const SizedBox(height: 2),
               Text(
                 value == null || value.isEmpty ? "---" : value,
@@ -1143,30 +1269,50 @@ class _DashboardPageState extends State<DashboardPage> {
         item(Icons.person_2_outlined, "Gender: ${_profileGender ?? '---'}"),
         item(Icons.badge_outlined, "ID Type: ${_profileIdType ?? '---'}"),
         item(Icons.badge_outlined, "ID Type No.: ${_profileIdNumber ?? '---'}"),
-        item(Icons.family_restroom_outlined,
-            "Marital Status: ${_profileMaritalStatus ?? '---'}"),
-        item(Icons.date_range_outlined,
-            "Date Joined: ${_formatDate(_profileDateJoined)}"),
-        item(Icons.date_range_rounded,
-            "Date of Birth: ${_formatDate(_profileDateOfBirth)}"),
-        item(Icons.local_post_office_outlined,
-            "Postal Address: ${_profilePostalAddress ?? '---'}"),
-        item(Icons.numbers_rounded,
-            "Postal Code: ${_profilePostalCode ?? '---'}"),
-        item(Icons.location_city_outlined,
-            "Postal Town: ${_profilePostalTown ?? '---'}"),
-        item(Icons.verified_user_outlined,
-            "Email verified at: ${_formatDate(_emailVerifiedAt)}"),
+        item(
+          Icons.family_restroom_outlined,
+          "Marital Status: ${_profileMaritalStatus ?? '---'}",
+        ),
+        item(
+          Icons.date_range_outlined,
+          "Date Joined: ${_formatDate(_profileDateJoined)}",
+        ),
+        item(
+          Icons.date_range_rounded,
+          "Date of Birth: ${_formatDate(_profileDateOfBirth)}",
+        ),
+        item(
+          Icons.local_post_office_outlined,
+          "Postal Address: ${_profilePostalAddress ?? '---'}",
+        ),
+        item(
+          Icons.numbers_rounded,
+          "Postal Code: ${_profilePostalCode ?? '---'}",
+        ),
+        item(
+          Icons.location_city_outlined,
+          "Postal Town: ${_profilePostalTown ?? '---'}",
+        ),
+        item(
+          Icons.verified_user_outlined,
+          "Email verified at: ${_formatDate(_emailVerifiedAt)}",
+        ),
         item(Icons.timer_outlined, "Created at: ${_formatDate(_createdAt)}"),
         item(Icons.timer_outlined, "Updated at: ${_formatDate(_updatedAt)}"),
-        item(Icons.account_balance,
-            "Bank Name: ${_bankAccountName ?? _userBank ?? '---'}"),
-        item(Icons.account_balance_wallet_outlined,
-            "Acc No.: ${_bankAccountNumber ?? '---'}"),
+        item(
+          Icons.account_balance,
+          "Bank Name: ${_bankAccountName ?? _userBank ?? '---'}",
+        ),
+        item(
+          Icons.account_balance_wallet_outlined,
+          "Acc No.: ${_bankAccountNumber ?? '---'}",
+        ),
         item(Icons.account_balance_outlined, "Branch: ${_branch ?? '---'}"),
         item(Icons.map, "Region: ${_region ?? _userRegion ?? '---'}"),
-        item(Icons.check_circle,
-            "Status: ${_agentStatus ?? _userStatus ?? '---'}"),
+        item(
+          Icons.check_circle,
+          "Status: ${_agentStatus ?? _userStatus ?? '---'}",
+        ),
         item(Icons.work_outline, "Role: ${_profileRole ?? '---'}"),
       ],
     );
@@ -1205,7 +1351,10 @@ class _DashboardPageState extends State<DashboardPage> {
             top: 0,
             child: SizedBox(
               height: heroHeight,
-              child: Image.asset(_images[_currentImageIndex], fit: BoxFit.cover),
+              child: Image.asset(
+                _images[_currentImageIndex],
+                fit: BoxFit.cover,
+              ),
             ),
           ),
           Positioned(
@@ -1449,9 +1598,10 @@ class _DashboardPageState extends State<DashboardPage> {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textSecondary),
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textSecondary,
+          ),
         ),
         const SizedBox(height: 4),
         Text(
@@ -1459,9 +1609,10 @@ class _DashboardPageState extends State<DashboardPage> {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary),
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textPrimary,
+          ),
         ),
       ],
     );
@@ -1565,8 +1716,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
     final db2List = await DatabaseHelper.instance.getData();
     for (var item in db2List) {
-      final s =
-          (item[DatabaseHelper.columnStatus] as String? ?? '').toLowerCase();
+      final s = (item[DatabaseHelper.columnStatus] as String? ?? '')
+          .toLowerCase();
       if (s == 'approved') {
         approved++;
       } else if (s == 'pending') {
@@ -1612,15 +1763,19 @@ class _DashboardPageState extends State<DashboardPage> {
             Text(
               value,
               style: TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w700, color: color),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
             ),
             const SizedBox(height: 2),
             Text(
               label,
               style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w500,
-                  color: AppColors.textSecondary),
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+                color: AppColors.textSecondary,
+              ),
             ),
           ],
         ),
@@ -1655,16 +1810,20 @@ class _DashboardPageState extends State<DashboardPage> {
                   color: AppColors.primary.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.people_outline,
-                    size: 18, color: AppColors.primary),
+                child: const Icon(
+                  Icons.people_outline,
+                  size: 18,
+                  color: AppColors.primary,
+                ),
               ),
               const SizedBox(width: 10),
               const Text(
                 "Clients summary",
                 style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black,
+                ),
               ),
             ],
           ),
@@ -1741,12 +1900,15 @@ class _DashboardPageState extends State<DashboardPage> {
                 ListTile(
                   leading: CircleAvatar(
                     backgroundColor: AppColors.primary.withOpacity(0.1),
-                    child: const Icon(Icons.phone_android,
-                        color: AppColors.primary),
+                    child: const Icon(
+                      Icons.phone_android,
+                      color: AppColors.primary,
+                    ),
                   ),
                   title: const Text("Digital registration"),
-                  subtitle:
-                      const Text("Capture details directly in the application"),
+                  subtitle: const Text(
+                    "Capture details directly in the application",
+                  ),
                   onTap: () {
                     Navigator.pop(ctx);
                     Navigator.push(
@@ -1820,8 +1982,9 @@ class _DashboardPageState extends State<DashboardPage> {
                         offset: const Offset(-2, 6),
                       ),
                     ],
-                    border:
-                        Border.all(color: AppColors.primary.withOpacity(0.08)),
+                    border: Border.all(
+                      color: AppColors.primary.withOpacity(0.08),
+                    ),
                   ),
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                   child: Column(
@@ -1830,22 +1993,31 @@ class _DashboardPageState extends State<DashboardPage> {
                     children: [
                       Row(
                         children: [
-                          const Text("More options",
-                              style: TextStyle(
-                                  fontSize: 16, fontWeight: FontWeight.w700)),
+                          const Text(
+                            "More options",
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                           const Spacer(),
                           IconButton(
-                              icon: const Icon(Icons.close),
-                              onPressed: () => Navigator.pop(ctx)),
+                            icon: const Icon(Icons.close),
+                            onPressed: () => Navigator.pop(ctx),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 8),
                       ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.lock_reset,
-                            color: AppColors.primary),
-                        title: const Text("Change Password",
-                            style: TextStyle(fontWeight: FontWeight.w600)),
+                        leading: const Icon(
+                          Icons.lock_reset,
+                          color: AppColors.primary,
+                        ),
+                        title: const Text(
+                          "Change Password",
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
                         onTap: () {
                           Navigator.pop(ctx);
                           Navigator.push(
@@ -1858,10 +2030,14 @@ class _DashboardPageState extends State<DashboardPage> {
                       ),
                       ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading:
-                            const Icon(Icons.logout, color: AppColors.danger),
-                        title: const Text("Log out",
-                            style: TextStyle(fontWeight: FontWeight.w600)),
+                        leading: const Icon(
+                          Icons.logout,
+                          color: AppColors.danger,
+                        ),
+                        title: const Text(
+                          "Log out",
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
                         onTap: () async {
                           Navigator.pop(ctx);
                           await _handleLogout();
@@ -1876,8 +2052,10 @@ class _DashboardPageState extends State<DashboardPage> {
         );
       },
       transitionBuilder: (ctx, anim, _, child) {
-        final tween = Tween(begin: const Offset(1, 0), end: Offset.zero)
-            .chain(CurveTween(curve: Curves.easeOut));
+        final tween = Tween(
+          begin: const Offset(1, 0),
+          end: Offset.zero,
+        ).chain(CurveTween(curve: Curves.easeOut));
         return SlideTransition(position: anim.drive(tween), child: child);
       },
     );
@@ -1897,35 +2075,43 @@ class _DashboardPageState extends State<DashboardPage> {
         border: Border.all(color: AppColors.primary.withOpacity(0.06)),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 10,
-              offset: const Offset(0, 4)),
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("Clients funnel",
-              style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary)),
+          Text(
+            "Clients funnel",
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
           const SizedBox(height: 6),
-          Text("From registration to approval",
-              style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+          Text(
+            "From registration to approval",
+            style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+          ),
           const SizedBox(height: 14),
           Container(
             height: 24,
             decoration: BoxDecoration(
-                color: AppColors.background,
-                borderRadius: BorderRadius.circular(20)),
+              color: AppColors.background,
+              borderRadius: BorderRadius.circular(20),
+            ),
             child: Row(
               children: [
                 _funnelSegment(fraction: approvedPct, color: AppColors.success),
                 _funnelSegment(fraction: pendingPct, color: AppColors.warning),
                 _funnelSegment(
-                    fraction: otherPct,
-                    color: AppColors.textSecondary.withOpacity(0.4)),
+                  fraction: otherPct,
+                  color: AppColors.textSecondary.withOpacity(0.4),
+                ),
               ],
             ),
           ),
@@ -1955,8 +2141,9 @@ class _DashboardPageState extends State<DashboardPage> {
       flex: flex,
       child: Container(
         decoration: BoxDecoration(
-            color: color.withOpacity(0.20),
-            borderRadius: BorderRadius.circular(20)),
+          color: color.withOpacity(0.20),
+          borderRadius: BorderRadius.circular(20),
+        ),
       ),
     );
   }
@@ -1969,12 +2156,15 @@ class _DashboardPageState extends State<DashboardPage> {
           height: 10,
           width: 10,
           decoration: BoxDecoration(
-              color: color.withOpacity(0.9),
-              borderRadius: BorderRadius.circular(3)),
+            color: color.withOpacity(0.9),
+            borderRadius: BorderRadius.circular(3),
+          ),
         ),
         const SizedBox(width: 4),
-        Text(label,
-            style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+        Text(
+          label,
+          style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+        ),
       ],
     );
   }
@@ -1992,7 +2182,8 @@ class _DashboardPageState extends State<DashboardPage> {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
-        child: (_profileImage != null &&
+        child:
+            (_profileImage != null &&
                 (_userImageAssetPath?.isNotEmpty ?? false))
             ? Image.file(_profileImage!, fit: BoxFit.cover)
             : Container(
@@ -2030,31 +2221,36 @@ class _DashboardPageState extends State<DashboardPage> {
                 border: Border.all(color: Colors.white.withOpacity(0.25)),
                 boxShadow: [
                   BoxShadow(
-                      color: Colors.black.withOpacity(0.25),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4)),
+                    color: Colors.black.withOpacity(0.25),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
                 ],
               ),
               child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       _userName ?? "Loading...",
                       style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       "Agent ID: ${_userId ?? '---'}",
                       style: const TextStyle(
-                          fontSize: 12,
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold),
+                        fontSize: 12,
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 12),
                     Text(
@@ -2074,16 +2270,18 @@ class _DashboardPageState extends State<DashboardPage> {
                         Text(
                           _category,
                           style: const TextStyle(
-                              fontSize: 11,
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold),
+                            fontSize: 11,
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         Text(
                           "MWK ${_formatMoney(_targetAmount)}",
                           style: const TextStyle(
-                              fontSize: 11,
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold),
+                            fontSize: 11,
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ],
                     ),
@@ -2099,8 +2297,9 @@ class _DashboardPageState extends State<DashboardPage> {
             child: Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                  color: AppColors.primary,
-                  borderRadius: BorderRadius.circular(12)),
+                color: AppColors.primary,
+                borderRadius: BorderRadius.circular(12),
+              ),
               child: const Icon(Icons.menu, color: Colors.white, size: 20),
             ),
           ),
@@ -2149,9 +2348,10 @@ class _DashboardPageState extends State<DashboardPage> {
                 child: Text(
                   label,
                   style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12),
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
                 ),
               ),
             ),
@@ -2173,15 +2373,18 @@ class _DashboardPageState extends State<DashboardPage> {
             borderRadius: BorderRadius.circular(18),
             boxShadow: [
               BoxShadow(
-                  color: Colors.black.withOpacity(0.06),
-                  blurRadius: 8,
-                  offset: const Offset(0, 4)),
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 8,
+                offset: const Offset(0, 4),
+              ),
             ],
             border: Border.all(color: AppColors.primary.withOpacity(0.08)),
           ),
           child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12.0, vertical: 16.0),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12.0,
+              vertical: 16.0,
+            ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2241,9 +2444,10 @@ class _DashboardPageState extends State<DashboardPage> {
           Text(
             label,
             style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary),
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
           ),
         ],
       ),

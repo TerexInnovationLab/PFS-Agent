@@ -151,8 +151,9 @@ class _StatisticsState extends State<Statistics> {
         nextMonthYear = "${data['month']} ${data['year']}".toUpperCase();
 
         // ✅ total generated from TargetsService: total_amount
-        nextTotal =
-            _toInt(data['total_amount'] ?? data['total'] ?? data['totalGenerated']);
+        nextTotal = _toInt(
+          data['total_amount'] ?? data['total'] ?? data['totalGenerated'],
+        );
 
         // ✅ transport incentive must be from transport_incentive (per your requirement)
         final transport = data['transport_incentive'];
@@ -187,7 +188,8 @@ class _StatisticsState extends State<Statistics> {
           }
 
           // END amount (support several possible keys)
-          final endMonth = transport['end_month'] ??
+          final endMonth =
+              transport['end_month'] ??
               transport['end'] ??
               transport['month_end'] ??
               transport['end_month_amount'];
@@ -260,8 +262,8 @@ class _StatisticsState extends State<Statistics> {
 
     final db2List = await DatabaseHelper.instance.getData();
     for (var item in db2List) {
-      final s =
-          (item[DatabaseHelper.columnStatus] as String? ?? '').toLowerCase();
+      final s = (item[DatabaseHelper.columnStatus] as String? ?? '')
+          .toLowerCase();
       if (s == 'approved') {
         approved++;
       } else if (s == 'pending') {
@@ -403,8 +405,10 @@ class _StatisticsState extends State<Statistics> {
               ),
               const Spacer(),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(20),
@@ -412,8 +416,11 @@ class _StatisticsState extends State<Statistics> {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.verified_rounded,
-                        size: 16, color: Colors.white),
+                    const Icon(
+                      Icons.verified_rounded,
+                      size: 16,
+                      color: Colors.white,
+                    ),
                     const SizedBox(width: 6),
                     Text(
                       _category,
@@ -478,8 +485,7 @@ class _StatisticsState extends State<Statistics> {
             pctOrNull == null || !_percentLoaded || _targetAmount <= 0;
 
         final int pct = loading ? 0 : pctOrNull!.clamp(0, 9999);
-        final double factor =
-            loading ? 0.0 : (pct / 100.0).clamp(0.0, 1.0);
+        final double factor = loading ? 0.0 : (pct / 100.0).clamp(0.0, 1.0);
 
         final Color barColor = loading
             ? Colors.white.withOpacity(0.35)
@@ -502,10 +508,7 @@ class _StatisticsState extends State<Statistics> {
                 curve: Curves.easeOutCubic,
                 alignment: Alignment.centerLeft,
                 widthFactor: factor,
-                child: Container(
-                  height: 18,
-                  color: barColor.withOpacity(0.95),
-                ),
+                child: Container(height: 18, color: barColor.withOpacity(0.95)),
               ),
             ),
             Positioned.fill(
@@ -809,12 +812,22 @@ class _StatisticsState extends State<Statistics> {
 
   // ================= EARNINGS CHART =================
   Widget _buildEarningsChartCard() {
-    final transportTotal = _transportMidAmount + _transportEndAmount;
+    const commissionColor = AppColors.primary;
+    const transportMidColor = AppColors.success;
+    const transportEndColor = Colors.blue;
 
     final data = [
-      _ChartItem("Commission", _commission.toDouble(), AppColors.primary),
-      _ChartItem("Transport", transportTotal.toDouble(), AppColors.secondary),
-      _ChartItem("Total", total.toDouble(), AppColors.info),
+      _ChartItem("Commission", _commission.toDouble(), commissionColor),
+      _ChartItem(
+        "Transport mid month",
+        _transportMidAmount.toDouble(),
+        transportMidColor,
+      ),
+      _ChartItem(
+        "Transport end month",
+        _transportEndAmount.toDouble(),
+        transportEndColor,
+      ),
     ];
 
     final double sum = data.fold(0, (prev, element) => prev + element.value);
