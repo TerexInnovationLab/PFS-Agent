@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:pfs_agent/pages/DigitalSignUp-Bounced.dart';
 import '../layouts/Colors.dart';
@@ -110,11 +109,14 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
   }
 
   Widget _imageRow(String label, String? path) {
-    final hasPath = path != null && path.trim().isNotEmpty;
-    File? file;
-    if (hasPath) {
-      file = File(path!);
-    }
+    final normalizedPath = path?.trim();
+    final hasPath = normalizedPath != null && normalizedPath.isNotEmpty;
+    final isRemote =
+        hasPath &&
+        (normalizedPath.startsWith('http://') ||
+            normalizedPath.startsWith('https://'));
+    final file = hasPath && !isRemote ? File(normalizedPath) : null;
+    final hasLocalFile = file?.existsSync() ?? false;
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6),
@@ -131,25 +133,38 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
               ),
             ),
             const SizedBox(height: 8),
-            hasPath && file!.existsSync()
+            hasPath && (isRemote || hasLocalFile)
                 ? GestureDetector(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => FullImagePage(imageFile: file!),
-                        ),
-                      );
-                    },
+                    onTap: hasLocalFile
+                        ? () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => FullImagePage(imageFile: file!),
+                              ),
+                            );
+                          }
+                        : null,
                     child: SizedBox(
                       height: 160,
                       width: double.infinity,
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(8),
-                        child: Image.file(
-                          file,
-                          fit: BoxFit.cover,
-                        ),
+                        child: isRemote
+                            ? Image.network(
+                                normalizedPath,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => const Center(
+                                  child: Text(
+                                    'Failed to load image',
+                                    style: TextStyle(color: Colors.grey),
+                                  ),
+                                ),
+                              )
+                            : Image.file(
+                                file!,
+                                fit: BoxFit.cover,
+                              ),
                       ),
                     ),
                   )

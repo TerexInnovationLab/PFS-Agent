@@ -41,6 +41,10 @@ class ClientPreviewState extends State<ClientPreview> {
         _formData = null;
       }
     }
+
+    if (_name.trim().isEmpty) {
+      _name = _getField('full_name');
+    }
   }
 
   Color get _statusColor {
@@ -209,11 +213,17 @@ class ClientPreviewState extends State<ClientPreview> {
   /// Shows an image card only if [path] is not empty.
   Widget _imageTile(String label, String? path) {
     if (path == null || path.isEmpty) {
-      // Hide tiles without data to avoid unnecessary space
       return const SizedBox.shrink();
     }
 
+    final isRemote =
+        path.startsWith('http://') || path.startsWith('https://');
     final file = File(path);
+    final hasLocalFile = !isRemote && file.existsSync();
+
+    if (!isRemote && !hasLocalFile) {
+      return const SizedBox.shrink();
+    }
 
     return Card(
       elevation: 2,
@@ -232,22 +242,35 @@ class ClientPreviewState extends State<ClientPreview> {
             const SizedBox(height: 8),
             GestureDetector(
               onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => FullImagePage(imageFile: file),
-                  ),
-                );
+                if (hasLocalFile) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => FullImagePage(imageFile: file),
+                    ),
+                  );
+                }
               },
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: SizedBox(
                   height: 160,
                   width: double.infinity,
-                  child: Image.file(
-                    file,
-                    fit: BoxFit.cover,
-                  ),
+                  child: isRemote
+                      ? Image.network(
+                          path,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const Center(
+                            child: Text(
+                              'Failed to load image',
+                              style: TextStyle(color: Colors.grey),
+                            ),
+                          ),
+                        )
+                      : Image.file(
+                          file,
+                          fit: BoxFit.cover,
+                        ),
                 ),
               ),
             ),

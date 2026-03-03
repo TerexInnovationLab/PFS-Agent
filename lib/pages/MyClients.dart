@@ -42,6 +42,7 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
   bool _isLive = false;
 
   final String _statusUrl = "${ApiConfig.baseUrl}/registrations/status";
+  final String _registrationsUrl = "${ApiConfig.baseUrl}/registrations";
 
   // server cache (id -> status/reason)
   final Map<String, String> _statusByServerId = {};
@@ -64,7 +65,7 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
   }
 
   Future<void> _bootstrap() async {
-    await _loadClients(); // local data
+    await _loadClients();
     await _rebuildIdMaps(); // maps used for DB updates
     _startPolling(); // every 2 seconds on this page
   }
@@ -124,6 +125,11 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
   /// Extract the SAME "server id" you used when sending to /registrations/status.
   /// (From your code: you collect id_number for analog and id_number/id for digital)
   String? _extractServerIdFromClient(Map<String, dynamic> client) {
+    final directServerId = client['server_id']?.toString().trim();
+    if (directServerId != null && directServerId.isNotEmpty) {
+      return directServerId;
+    }
+
     final source = client['source']?.toString() ?? 'analog';
 
     if (source == 'digital') {
@@ -153,6 +159,379 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
     }
 
     return null;
+  }
+
+  String? _firstNonEmpty(Iterable<dynamic> values) {
+    for (final value in values) {
+      if (value == null) continue;
+      final text = value.toString().trim();
+      if (text.isNotEmpty && text.toLowerCase() != 'null') {
+        return text;
+      }
+    }
+    return null;
+  }
+
+  bool _parseBool(dynamic value) {
+    if (value is bool) return value;
+    final normalized = value?.toString().trim().toLowerCase() ?? '';
+    return normalized == '1' ||
+        normalized == 'true' ||
+        normalized == 'yes' ||
+        normalized == 'y';
+  }
+
+  String _apiOrigin() {
+    final uri = Uri.parse(ApiConfig.baseUrl);
+    final portPart =
+        uri.hasPort && uri.port != 80 && uri.port != 443 ? ':${uri.port}' : '';
+    return '${uri.scheme}://${uri.host}$portPart';
+  }
+
+  String? _normalizeAssetPath(dynamic value) {
+    final raw = value?.toString().trim();
+    if (raw == null || raw.isEmpty) return null;
+
+    if (raw.startsWith('http://') ||
+        raw.startsWith('https://') ||
+        raw.startsWith('file://')) {
+      return raw;
+    }
+
+    if (raw.startsWith('/')) {
+      return '${_apiOrigin()}$raw';
+    }
+
+    return raw;
+  }
+
+  String? _extractServerIdFromRegistration(Map<String, dynamic> item) {
+    return _firstNonEmpty([
+      item['registration_id'],
+      item['client_id'],
+      item['id'],
+      item['id_number'],
+      item['server_id'],
+    ]);
+  }
+
+  String _detectServerSource(Map<String, dynamic> item) {
+    final explicit = _firstNonEmpty([
+      item['source'],
+      item['registration_type'],
+      item['type'],
+      item['channel'],
+      item['mode'],
+      item['form_type'],
+    ]);
+
+    final normalizedExplicit = explicit?.toLowerCase();
+    if (normalizedExplicit != null) {
+      if (normalizedExplicit.contains('digital')) return 'digital';
+      if (normalizedExplicit.contains('analog')) return 'analog';
+      if (normalizedExplicit.contains('upload')) return 'analog';
+      if (normalizedExplicit.contains('scan')) return 'analog';
+    }
+
+    final hasDigitalFields = item.containsKey('first_name') ||
+        item.containsKey('surname') ||
+        item.containsKey('mobile_tel_no1') ||
+        item.containsKey('account_number') ||
+        item.containsKey('loan_period');
+
+    return hasDigitalFields ? 'digital' : 'analog';
+  }
+
+  Map<String, dynamic> _normalizeDigitalPreviewData(
+    Map<String, dynamic> item,
+    String? serverId,
+  ) {
+    return {
+      'id': serverId ?? item['id'],
+      'client_id': serverId ?? item['client_id'] ?? item['id'],
+      'titleValue': item['title'] ?? item['titleValue'],
+      'firstName': item['first_name'] ?? item['firstName'],
+      'surname': item['surname'],
+      'idNumber': item['id_number'] ?? item['idNumber'],
+      'dateOfBirth': item['date_of_birth'] ?? item['dateOfBirth'],
+      'gender': item['gender'],
+      'dependants': item['number_of_dependants'] ?? item['dependants'],
+      'maritalStatus': item['marital_status'] ?? item['maritalStatus'],
+      'homeDistrict': item['district'] ?? item['homeDistrict'],
+      'homeTraditionalAuthority':
+          item['traditional_authority'] ?? item['homeTraditionalAuthority'],
+      'homeVillage': item['home_village_details'] ?? item['homeVillage'],
+      'physicalAddress': item['physical_address'] ?? item['physicalAddress'],
+      'city': item['town'] ?? item['city'],
+      'province': item['province'],
+      'workTel': item['work_tel_no'] ?? item['workTel'],
+      'homeTel': item['home_tel_no'] ?? item['homeTel'],
+      'mobile1': item['mobile_tel_no1'] ?? item['mobile1'],
+      'mobile2': item['mobile_tel_no2'] ?? item['mobile2'],
+      'email1': item['email1'],
+      'email2': item['email2'],
+      'famSurname': item['fam_surname'] ?? item['famSurname'],
+      'famFirstName': item['fam_first_name'] ?? item['famFirstName'],
+      'famTitle': item['fam_title'] ?? item['famTitle'],
+      'famRelation': item['fam_relation'] ?? item['famRelation'],
+      'famHomeTel': item['fam_home_tel_no'] ?? item['famHomeTel'],
+      'famMobile': item['fam_mobile_tel_no'] ?? item['famMobile'],
+      'famAddress': item['fam_address'] ?? item['famAddress'],
+      'employerName': item['employer_name'] ?? item['employerName'],
+      'specificEmployer':
+          item['specific_employer'] ?? item['specificEmployer'],
+      'department': item['department'],
+      'jobTitle': item['job_title'] ?? item['jobTitle'],
+      'employerCode': item['employee_code'] ?? item['employerCode'],
+      'lengthYears':
+          item['length_of_service_years'] ?? item['lengthYears'],
+      'lengthMonths':
+          item['length_of_service_months'] ?? item['lengthMonths'],
+      'employedFullTime':
+          _parseBool(item['full_staff'] ?? item['employedFullTime']),
+      'grossAnnual': item['gross_annual_salary'] ?? item['grossAnnual'],
+      'netMonthly': item['net_monthly_income'] ?? item['netMonthly'],
+      'workAddress': item['work_address'] ?? item['workAddress'],
+      'workCity': item['work_city'] ?? item['workCity'],
+      'workProvince': item['work_province'] ?? item['workProvince'],
+      'salaryFrequency':
+          item['work_salary_frequency'] ?? item['salaryFrequency'],
+      'salaryPayDate': item['salary_pay_date'] ?? item['salaryPayDate'],
+      'bankName': item['bank_name'] ?? item['bankName'],
+      'accountHolder': item['account_holder'] ?? item['accountHolder'],
+      'branchName': item['branch_name'] ?? item['branchName'],
+      'branchCode': item['branch_code'] ?? item['branchCode'],
+      'accountNumber': item['account_number'] ?? item['accountNumber'],
+      'accountType': item['account_type'] ?? item['accountType'],
+      'salaryPaidIntoAccount': _parseBool(
+        item['is_salary_paid_to_this_account'] ?? item['salaryPaidIntoAccount'],
+      ),
+      'accountUsageYears':
+          item['account_usage_years'] ?? item['accountUsageYears'],
+      'accountUsageMonths':
+          item['account_usage_months'] ?? item['accountUsageMonths'],
+      'salaryTransferred3Months': _parseBool(
+        item['salary_been_transferred_for_3_months'] ??
+            item['salaryTransferred3Months'],
+      ),
+      'totalApplied': item['total_applied_for'] ?? item['totalApplied'],
+      'totalApproved':
+          item['total_amount_approved'] ?? item['totalApproved'],
+      'cashToClient': item['cash_to_client'] ?? item['cashToClient'],
+      'loanPeriod': item['loan_period'] ?? item['loanPeriod'],
+      'adminFee': item['admin_fee'] ?? item['adminFee'],
+      'interest': item['interest'],
+      'totalCollectable':
+          item['total_collectable'] ?? item['totalCollectable'],
+      'monthlyInstalment':
+          item['monthly_installment'] ?? item['monthlyInstalment'],
+      'loanPurpose': item['loan_purpose'] ?? item['loanPurpose'],
+      'loanPurposeText': item['loan_purpose_text'] ?? item['loanPurposeText'],
+      'clientSignaturePath': _normalizeAssetPath(
+        item['client_signature_url'] ??
+            item['client_signature'] ??
+            item['clientSignaturePath'],
+      ),
+      'identificationPath': _normalizeAssetPath(
+        item['front_of_id_url'] ??
+            item['front_of_id'] ??
+            item['identificationPath'],
+      ),
+      'identificationPathBack': _normalizeAssetPath(
+        item['back_of_id_url'] ??
+            item['back_of_id'] ??
+            item['identificationPathBack'],
+      ),
+      'customerPhoto': _normalizeAssetPath(
+        item['customer_photo_url'] ??
+            item['customer_photo'] ??
+            item['customerPhoto'],
+      ),
+      'self': _normalizeAssetPath(
+        item['selfie_url'] ?? item['selfie'] ?? item['self'],
+      ),
+      'latestPayslipPath': _normalizeAssetPath(
+        item['latest_payslip_url'] ??
+            item['latest_payslip'] ??
+            item['latestPayslipPath'],
+      ),
+      'bankStatementPath': _normalizeAssetPath(
+        item['bank_statement_url'] ??
+            item['bank_statement'] ??
+            item['bankStatementPath'],
+      ),
+      'employerLetterPath': _normalizeAssetPath(
+        item['employer_letter_url'] ??
+            item['employer_letter'] ??
+            item['employerLetterPath'],
+      ),
+    };
+  }
+
+  Map<String, dynamic> _normalizeAnalogPreviewData(
+    Map<String, dynamic> item,
+    String? serverId,
+  ) {
+    return {
+      'full_name': item['full_name'] ?? item['information'],
+      'id_number': serverId ?? item['id_number'] ?? item['id'],
+      'frontIdPath': _normalizeAssetPath(
+        item['front_of_id_url'] ?? item['front_of_id'] ?? item['frontIdPath'],
+      ),
+      'backIdPath': _normalizeAssetPath(
+        item['back_of_id_url'] ?? item['back_of_id'] ?? item['backIdPath'],
+      ),
+      'selfiePath': _normalizeAssetPath(
+        item['selfie_url'] ?? item['selfie'] ?? item['selfiePath'],
+      ),
+      'signaturePath': _normalizeAssetPath(
+        item['client_signature_url'] ??
+            item['client_signature'] ??
+            item['signaturePath'],
+      ),
+      'customerPhotoPath': _normalizeAssetPath(
+        item['customer_photo_url'] ??
+            item['customer_photo'] ??
+            item['customerPhotoPath'],
+      ),
+      'payslipPath': _normalizeAssetPath(
+        item['latest_payslip_url'] ??
+            item['latest_payslip'] ??
+            item['payslipPath'],
+      ),
+      'bankStatementPath': _normalizeAssetPath(
+        item['bank_statement_url'] ??
+            item['bank_statement'] ??
+            item['bankStatementPath'],
+      ),
+      'employerLetterPath': _normalizeAssetPath(
+        item['employer_letter_url'] ??
+            item['employer_letter'] ??
+            item['employerLetterPath'],
+      ),
+      'applicationFormPath': _normalizeAssetPath(
+        item['application_form_url'] ??
+            item['application_form'] ??
+            item['applicationFormPath'],
+      ),
+    };
+  }
+
+  Map<String, dynamic>? _normalizeServerClient(Map raw) {
+    try {
+      final item = Map<String, dynamic>.from(raw.cast<dynamic, dynamic>());
+      final source = _detectServerSource(item);
+      final serverId = _extractServerIdFromRegistration(item);
+      final status = _normalizeStatus(item['status']?.toString());
+      final reason = _firstNonEmpty([
+        item['reason'],
+        item['rejection_reason'],
+        item['bounce_reason'],
+        item['comment'],
+      ]);
+
+      if (source == 'digital') {
+        final data = _normalizeDigitalPreviewData(item, serverId);
+        final name = _firstNonEmpty([
+          item['full_name'],
+          item['information'],
+          [
+            (data['titleValue'] ?? '').toString().trim(),
+            (data['firstName'] ?? '').toString().trim(),
+            (data['surname'] ?? '').toString().trim(),
+          ].where((e) => e.isNotEmpty).join(' '),
+        ]);
+
+        return {
+          'id': serverId ?? item['id'],
+          'server_id': serverId,
+          'status': status,
+          'reason': reason,
+          'information': name ?? 'No Name',
+          'data': jsonEncode(data),
+          'source': 'digital',
+          'storage': 'server',
+        };
+      }
+
+      final formData = _normalizeAnalogPreviewData(item, serverId);
+      final name = _firstNonEmpty([
+        item['full_name'],
+        item['information'],
+        formData['full_name'],
+      ]);
+
+      return {
+        'id': serverId ?? item['id'],
+        'server_id': serverId,
+        'status': status,
+        'reason': reason,
+        'information': name ?? 'Unnamed client',
+        'form_data': jsonEncode(formData),
+        'source': 'analog',
+        'storage': 'server',
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _loadLocalDraftClients() async {
+    final analog = await DatabaseHelper.instance.getData();
+    final analogDrafts = analog
+        .where((c) => _normalizeStatus(c['status']?.toString()) == 'draft')
+        .map<Map<String, dynamic>>(
+          (c) => {
+            ...c,
+            'status': 'draft',
+            'source': 'analog',
+            'storage': 'local',
+          },
+        )
+        .toList();
+
+    final digitalRegs = await DigitalRegistrationDb.instance.getAll();
+    final digitalDrafts = digitalRegs
+        .where((reg) => _normalizeStatus(reg.status) == 'draft')
+        .map<Map<String, dynamic>>((reg) {
+          return {
+            'id': reg.id,
+            'status': 'draft',
+            'reason': reg.reason,
+            'data': jsonEncode(reg.data),
+            'source': 'digital',
+            'storage': 'local',
+          };
+        }).toList();
+
+    return [...analogDrafts, ...digitalDrafts];
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchServerClients() async {
+    final token = await _getToken();
+    final response = await http.get(
+      Uri.parse(_registrationsUrl),
+      headers: {
+        'Accept': 'application/json',
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+      },
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Failed to load registrations');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) return [];
+
+    final registrations = decoded['registrations'] ?? decoded['data'];
+    if (registrations is! List) return [];
+
+    return registrations
+        .whereType<Map>()
+        .map(_normalizeServerClient)
+        .whereType<Map<String, dynamic>>()
+        .toList();
   }
 
   String _getEffectiveStatus(Map<String, dynamic> client) {
@@ -337,8 +716,9 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
 
         final serverId = item['id']?.toString().trim();
         final serverStatusRaw = item['status']?.toString();
-        if (serverId == null || serverId.isEmpty || serverStatusRaw == null)
+        if (serverId == null || serverId.isEmpty || serverStatusRaw == null) {
           continue;
+        }
 
         final serverStatus = _normalizeStatus(serverStatusRaw);
         final prior = _statusByServerId[serverId];
@@ -445,33 +825,20 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
   // ========================= LOAD CLIENTS =========================
 
   Future<void> _loadClients() async {
-    // 1) analog
-    final analog = await DatabaseHelper.instance.getData();
-    final analogWithSource = analog
-        .map<Map<String, dynamic>>(
-          (c) => {
-            ...c,
-            'status': _normalizeStatus(c['status']?.toString()),
-            'source': 'analog',
-          },
-        )
-        .toList();
+    final localDrafts = await _loadLocalDraftClients();
+    List<Map<String, dynamic>> serverClients = [];
 
-    // 2) digital
-    final digitalRegs = await DigitalRegistrationDb.instance.getAll();
-    final digital = digitalRegs.map<Map<String, dynamic>>((reg) {
-      return {
-        'id': reg.id,
-        'status': _normalizeStatus(reg.status?.toString()),
-        'data': jsonEncode(reg.data),
-        'source': 'digital',
-      };
-    }).toList();
+    try {
+      serverClients = await _fetchServerClients();
+      _isLive = true;
+    } catch (_) {
+      _isLive = false;
+    }
 
     if (!mounted) return;
 
     setState(() {
-      _clients = [...analogWithSource, ...digital];
+      _clients = [...localDrafts, ...serverClients];
       listAvailable = _clients.isNotEmpty;
     });
   }
@@ -597,6 +964,8 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
   }
 
   void _showEditDeleteOptions(Map<String, dynamic> client) {
+    if (client['storage']?.toString() != 'local') return;
+
     final source = client['source']?.toString() ?? 'analog';
 
     showModalBottomSheet(
@@ -1134,10 +1503,15 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
                                             final client =
                                                 _filteredClients[index];
                                             return GestureDetector(
-                                              onLongPress: () =>
-                                                  _showEditDeleteOptions(
-                                                    client,
-                                                  ),
+                                              onLongPress:
+                                                  client['storage']
+                                                              ?.toString() ==
+                                                          'local'
+                                                      ? () =>
+                                                            _showEditDeleteOptions(
+                                                              client,
+                                                            )
+                                                      : null,
                                               onTap: () => _openClient(client),
                                               child: buildClientItem(
                                                 _getClientName(client),

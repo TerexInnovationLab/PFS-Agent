@@ -46,23 +46,6 @@ class _MyAppState extends State<MyApp> {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFF16831)),
         useMaterial3: true,
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
           fillColor: Color(0xFFFDE1D6),
