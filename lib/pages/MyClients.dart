@@ -68,7 +68,8 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
   Future<void> _bootstrap() async {
     final cachedClients = await ClientListCacheService.instance.getCachedClients();
     if (mounted && cachedClients.isNotEmpty) {
-      _applyClients(cachedClients);
+      final mergedCached = await _mergeWithCurrentLocalDrafts(cachedClients);
+      _applyClients(mergedCached);
     }
 
     await _loadClients();
@@ -285,17 +286,11 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
 
       // No clients? Nothing to poll.
       if (_clients.isEmpty) {
-        if (mounted) {
-          setState(() => _isLive = true); // page is OK; nothing to poll
-        }
         return;
       }
 
       final ids = await _collectServerIds();
       if (ids.isEmpty) {
-        if (mounted) {
-          setState(() => _isLive = true);
-        }
         return;
       }
 
@@ -475,19 +470,68 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
   Future<void> _loadClients() async {
     try {
       final clients = await ClientListCacheService.instance.refreshClients();
-      _isLive = true;
       if (!mounted) return;
       _applyClients(clients);
     } catch (_) {
-      _isLive = false;
       final cached = await ClientListCacheService.instance.getCachedClients();
+      final mergedCached = await _mergeWithCurrentLocalDrafts(cached);
+
       if (!mounted) return;
-      if (cached.isNotEmpty) {
-        _applyClients(cached);
-      } else {
-        _applyClients(const []);
-      }
+      _applyClients(mergedCached);
     }
+  }
+
+  Future<List<Map<String, dynamic>>> _mergeWithCurrentLocalDrafts(
+    List<Map<String, dynamic>> baseClients,
+  ) async {
+    final currentLocalDrafts = await _loadCurrentLocalDrafts();
+    final nonLocalClients = baseClients.where((client) {
+      final storage = client['storage']?.toString();
+      final status = _normalizeStatus(client['status']?.toString());
+      return !(storage == 'local' || status == 'draft');
+    }).map((client) => Map<String, dynamic>.from(client)).toList();
+
+    return [...currentLocalDrafts, ...nonLocalClients];
+  }
+
+  Future<List<Map<String, dynamic>>> _loadCurrentLocalDrafts() async {
+    final analog = await DatabaseHelper.instance.getData();
+    final analogDrafts = analog
+        .where((c) => _normalizeStatus(c['status']?.toString()) == 'draft')
+        .map<Map<String, dynamic>>(
+          (c) => {
+            ...c,
+            'status': 'draft',
+            'source': 'analog',
+            'storage': 'local',
+          },
+        )
+        .toList();
+
+    final digitalRegs = await DigitalRegistrationDb.instance.getAll();
+    final digitalDrafts = digitalRegs
+        .where((reg) => _normalizeStatus(reg.status?.toString()) == 'draft')
+        .map<Map<String, dynamic>>((reg) {
+          final data = Map<String, dynamic>.from(reg.data);
+          final title = (data['titleValue'] ?? '').toString().trim();
+          final firstName = (data['firstName'] ?? '').toString().trim();
+          final surname = (data['surname'] ?? '').toString().trim();
+          final nameParts = [title, firstName, surname]
+              .where((part) => part.isNotEmpty)
+              .toList();
+
+          return {
+            'id': reg.id,
+            'status': 'draft',
+            'reason': reg.reason,
+            'information': nameParts.isNotEmpty ? nameParts.join(' ') : 'No Name',
+            'data': jsonEncode(data),
+            'source': 'digital',
+            'storage': 'local',
+          };
+        }).toList();
+
+    return [...analogDrafts, ...digitalDrafts];
   }
 
   // ========================= UI HELPERS =========================

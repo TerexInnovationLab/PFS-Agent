@@ -381,10 +381,21 @@ class ClientListCacheService {
     final digitalDrafts = digitalRegs
         .where((reg) => _normalizeStatus(reg.status) == 'draft')
         .map<Map<String, dynamic>>((reg) {
+          final name = _firstNonEmpty([
+            reg.data['full_name'],
+            reg.data['information'],
+            [
+              (reg.data['titleValue'] ?? '').toString().trim(),
+              (reg.data['firstName'] ?? '').toString().trim(),
+              (reg.data['surname'] ?? '').toString().trim(),
+            ].where((part) => part.isNotEmpty).join(' '),
+          ]);
+
           return {
             'id': reg.id,
             'status': 'draft',
             'reason': reg.reason,
+            'information': name ?? 'No Name',
             'data': jsonEncode(reg.data),
             'source': 'digital',
             'storage': 'local',

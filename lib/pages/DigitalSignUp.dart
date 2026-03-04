@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
 
@@ -34,7 +35,8 @@ class DigitalSignUp extends StatefulWidget {
 // Uniform vertical gap used between form fields on this page.
 const double _digitalSignUpFieldGap = 20.0;
 
-class DigitalSignUpState extends State<DigitalSignUp> {
+class DigitalSignUpState extends State<DigitalSignUp>
+    with WidgetsBindingObserver {
   //this is for the database
   int? _localId; // ID of the record in SQLite
   bool _submittedToServer = false;
@@ -45,6 +47,11 @@ class DigitalSignUpState extends State<DigitalSignUp> {
 
   final PageController _pageController = PageController();
   int _currentStep = 0;
+  bool _restoringDraft = false;
+  final Map<String, FocusNode> _focusNodes = {};
+  String? _lastActiveField;
+  bool _draftSaveInFlight = false;
+  bool _draftSaveQueued = false;
 
   // --- Controllers & state for all fields (grouped by section) ---
   // 1. System information
@@ -63,9 +70,11 @@ class DigitalSignUpState extends State<DigitalSignUp> {
   final TextEditingController firstNameController = TextEditingController();
   final TextEditingController idNumberController = TextEditingController();
   DateTime? dateOfBirth;
-  String gender = 'male';
+  String? gender;
+  bool _genderSelected = false;
   final TextEditingController dependantsController = TextEditingController();
-  String maritalStatus = 'single';
+  String? maritalStatus;
+  bool _maritalStatusSelected = false;
   final TextEditingController homeVillageController = TextEditingController();
   final TextEditingController villageController = TextEditingController();
   final TextEditingController districtController = TextEditingController();
@@ -105,13 +114,15 @@ class DigitalSignUpState extends State<DigitalSignUp> {
   final TextEditingController employerCodeController = TextEditingController();
   final TextEditingController lengthYearsController = TextEditingController();
   final TextEditingController lengthMonthsController = TextEditingController();
-  bool employedFullTime = true;
+  bool? employedFullTime;
+  bool _employedFullTimeSelected = false;
   final TextEditingController grossAnnualController = TextEditingController();
   final TextEditingController netMonthlyController = TextEditingController();
   final TextEditingController workAddressController = TextEditingController();
   final TextEditingController workCityController = TextEditingController();
   String? workProvince;
-  String salaryFrequency = 'monthly';
+  String? salaryFrequency;
+  bool _salaryFrequencySelected = false;
   DateTime? salaryPayDate;
 
   // 8. Banking details
@@ -120,13 +131,16 @@ class DigitalSignUpState extends State<DigitalSignUp> {
   final TextEditingController branchNameController = TextEditingController();
   final TextEditingController branchCodeController = TextEditingController();
   final TextEditingController accountNumberController = TextEditingController();
-  String accountType = 'current';
-  bool salaryPaidIntoAccount = true;
+  String? accountType;
+  bool _accountTypeSelected = false;
+  bool? salaryPaidIntoAccount;
+  bool _salaryPaidIntoAccountSelected = false;
   final TextEditingController accountUsageYearsController =
       TextEditingController();
   final TextEditingController accountUsageMonthsController =
       TextEditingController();
-  bool salaryTransferred3Months = false;
+  bool? salaryTransferred3Months;
+  bool _salaryTransferred3MonthsSelected = false;
 
   // 9. Supporting documentation (file placeholders)
   String? idFileName;
@@ -194,12 +208,132 @@ class DigitalSignUpState extends State<DigitalSignUp> {
 
   final String url = ApiConfig.baseUrl + '/client';
 
+  Map<TextEditingController, String> get _controllerFieldIds => {
+    systemInfoController: 'systemInfo',
+    psmReservationNumberController: 'psmReservationNumber',
+    surnameController: 'surname',
+    firstNameController: 'firstName',
+    idNumberController: 'idNumber',
+    dependantsController: 'dependants',
+    homeVillageController: 'homeVillageDetails',
+    villageController: 'village',
+    districtController: 'district',
+    traditionalAuthorityController: 'traditionalAuthority',
+    physicalAddressController: 'physicalAddress',
+    cityController: 'city',
+    postalAddressController: 'postalAddress',
+    workTelController: 'workTel',
+    homeTelController: 'homeTel',
+    mobile1Controller: 'mobile1',
+    mobile2Controller: 'mobile2',
+    email1Controller: 'email1',
+    email2Controller: 'email2',
+    famSurnameController: 'famSurname',
+    famFirstNameController: 'famFirstName',
+    famRelationController: 'famRelation',
+    famHomeTelController: 'famHomeTel',
+    famMobileController: 'famMobile',
+    famAddressController: 'famAddress',
+    employerNameController: 'employerName',
+    employerSpecificController: 'employerSpecific',
+    departmentController: 'department',
+    jobTitleController: 'jobTitle',
+    employerCodeController: 'employerCode',
+    lengthYearsController: 'lengthYears',
+    lengthMonthsController: 'lengthMonths',
+    grossAnnualController: 'grossAnnual',
+    netMonthlyController: 'netMonthly',
+    workAddressController: 'workAddress',
+    workCityController: 'workCity',
+    bankNameController: 'bankName',
+    accountHolderController: 'accountHolder',
+    branchNameController: 'branchName',
+    branchCodeController: 'branchCode',
+    accountNumberController: 'accountNumber',
+    accountUsageYearsController: 'accountUsageYears',
+    accountUsageMonthsController: 'accountUsageMonths',
+    referralAgentController: 'referralAgent',
+    baseLendingRateController: 'baseLendingRate',
+    effectiveInterestRateController: 'effectiveInterestRate',
+    netPayController: 'netPay',
+    maxAllowedInstalmentController: 'maxAllowedInstalment',
+    totalAppliedController: 'totalApplied',
+    totalApprovedController: 'totalApproved',
+    cashToClientController: 'cashToClient',
+    loanPeriodController: 'loanPeriod',
+    adminFeeController: 'adminFee',
+    interestController: 'interest',
+    totalCollectableController: 'totalCollectable',
+    monthlyInstalmentController: 'monthlyInstalment',
+    loanPurposeController: 'loanPurposeText',
+  };
+
+  List<TextEditingController> get _allControllers => [
+    systemInfoController,
+    psmReservationNumberController,
+    surnameController,
+    firstNameController,
+    idNumberController,
+    dependantsController,
+    homeVillageController,
+    villageController,
+    districtController,
+    traditionalAuthorityController,
+    physicalAddressController,
+    cityController,
+    postalAddressController,
+    workTelController,
+    homeTelController,
+    mobile1Controller,
+    mobile2Controller,
+    email1Controller,
+    email2Controller,
+    famSurnameController,
+    famFirstNameController,
+    famRelationController,
+    famHomeTelController,
+    famMobileController,
+    famAddressController,
+    employerNameController,
+    employerSpecificController,
+    departmentController,
+    jobTitleController,
+    employerCodeController,
+    lengthYearsController,
+    lengthMonthsController,
+    grossAnnualController,
+    netMonthlyController,
+    workAddressController,
+    workCityController,
+    bankNameController,
+    accountHolderController,
+    branchNameController,
+    branchCodeController,
+    accountNumberController,
+    accountUsageYearsController,
+    accountUsageMonthsController,
+    referralAgentController,
+    baseLendingRateController,
+    effectiveInterestRateController,
+    netPayController,
+    maxAllowedInstalmentController,
+    totalAppliedController,
+    totalApprovedController,
+    cashToClientController,
+    loanPeriodController,
+    adminFeeController,
+    interestController,
+    totalCollectableController,
+    monthlyInstalmentController,
+    loanPurposeController,
+  ];
+
   Future<void> pickFile(String which) async {
     final result = await FilePicker.platform.pickFiles();
     if (result != null && result.files.isNotEmpty) {
       final p = result.files.first.path;
       if (p != null) {
-        setState(() {
+        _setDraftState(() {
           switch (which) {
             case 'client_signature':
               clientSignaturePath = p;
@@ -240,7 +374,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
     );
 
     if (result != null && result.isNotEmpty) {
-      setState(() {
+      _setDraftState(() {
         clientSignaturePath = result;
         signatureCopy = File(result);
       });
@@ -343,6 +477,15 @@ class DigitalSignUpState extends State<DigitalSignUp> {
 
   Map<String, dynamic> _collectFormData() {
     return {
+      'localId': _localId,
+      'currentStep': _currentStep,
+      'lastActiveField': _lastActiveField,
+      'applicationDate': applicationDate?.toIso8601String(),
+      'appTypeGovernmentPayroll': appTypeGovernmentPayroll,
+      'appTypeShortTermPrivate': appTypeShortTermPrivate,
+      'psmReservationNumber': psmReservationNumberController.text,
+      'systemInformation': systemInfoController.text,
+
       // --- Personal information ---
       'titleValue': titleValue,
       'surname': surnameController.text,
@@ -350,8 +493,11 @@ class DigitalSignUpState extends State<DigitalSignUp> {
       'idNumber': idNumberController.text,
       'dateOfBirth': dateOfBirth?.toIso8601String(),
       'gender': gender,
+      'genderSelected': _genderSelected,
       'dependants': dependantsController.text,
       'maritalStatus': maritalStatus,
+      'maritalStatusSelected': _maritalStatusSelected,
+      'homeVillageDetails': homeVillageController.text,
       'homeDistrict': districtController.text,
       'homeTraditionalAuthority': traditionalAuthorityController.text,
       'homeVillage': villageController.text,
@@ -360,6 +506,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
       'physicalAddress': physicalAddressController.text,
       'city': cityController.text,
       'province': province,
+      'postalAddress': postalAddressController.text,
 
       // --- Contact ---
       'workTel': workTelController.text,
@@ -387,12 +534,14 @@ class DigitalSignUpState extends State<DigitalSignUp> {
       'lengthYears': lengthYearsController.text,
       'lengthMonths': lengthMonthsController.text,
       'employedFullTime': employedFullTime,
+      'employedFullTimeSelected': _employedFullTimeSelected,
       'grossAnnual': grossAnnualController.text,
       'netMonthly': netMonthlyController.text,
       'workAddress': workAddressController.text,
       'workCity': workCityController.text,
       'workProvince': workProvince,
       'salaryFrequency': salaryFrequency,
+      'salaryFrequencySelected': _salaryFrequencySelected,
       'salaryPayDate': salaryPayDate?.toIso8601String(),
 
       // --- Banking ---
@@ -402,12 +551,22 @@ class DigitalSignUpState extends State<DigitalSignUp> {
       'branchCode': branchCodeController.text,
       'accountNumber': accountNumberController.text,
       'accountType': accountType,
+      'accountTypeSelected': _accountTypeSelected,
       'salaryPaidIntoAccount': salaryPaidIntoAccount,
+      'salaryPaidIntoAccountSelected': _salaryPaidIntoAccountSelected,
       'accountUsageYears': accountUsageYearsController.text,
       'accountUsageMonths': accountUsageMonthsController.text,
       'salaryTransferred3Months': salaryTransferred3Months,
+      'salaryTransferred3MonthsSelected':
+          _salaryTransferred3MonthsSelected,
 
       // --- Loan schedule ---
+      'baseLendingRate': baseLendingRateController.text,
+      'effectiveInterestRate': effectiveInterestRateController.text,
+      'firstInstalmentDate': firstInstalmentDate?.toIso8601String(),
+      'lastInstalmentDate': lastInstalmentDate?.toIso8601String(),
+      'netPay': netPayController.text,
+      'maxAllowedInstalment': maxAllowedInstalmentController.text,
       'totalApplied': totalAppliedController.text,
       'totalApproved': totalApprovedController.text,
       'cashToClient': cashToClientController.text,
@@ -418,6 +577,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
       'monthlyInstalment': monthlyInstalmentController.text,
       'loanPurpose': loanpurpose,
       'loanPurposeText': loanPurposeController.text,
+      'referralAgent': referralAgentController.text,
 
       // --- Declaration ---
       'acceptedDeclaration': acceptedDeclaration,
@@ -435,7 +595,26 @@ class DigitalSignUpState extends State<DigitalSignUp> {
   }
 
   void _loadFromData(Map<String, dynamic> data) {
+    final storedStep = data['currentStep'];
+    final parsedStep = storedStep is int
+        ? storedStep
+        : int.tryParse(storedStep?.toString() ?? '');
+    final maxStepIndex = _steps.length - 1;
+
     setState(() {
+      _currentStep = parsedStep == null
+          ? 0
+          : parsedStep.clamp(0, maxStepIndex).toInt();
+      _localId ??= data['localId'] as int?;
+      _lastActiveField = data['lastActiveField']?.toString();
+      final applicationDateStr = data['applicationDate'];
+      applicationDate = applicationDateStr != null
+          ? DateTime.tryParse(applicationDateStr.toString())
+          : null;
+      appTypeGovernmentPayroll = data['appTypeGovernmentPayroll'] == true;
+      appTypeShortTermPrivate = data['appTypeShortTermPrivate'] == true;
+      psmReservationNumberController.text = data['psmReservationNumber'] ?? '';
+      systemInfoController.text = data['systemInformation'] ?? '';
       titleValue = data['titleValue'];
       surnameController.text = data['surname'] ?? '';
       firstNameController.text = data['firstName'] ?? '';
@@ -444,9 +623,20 @@ class DigitalSignUpState extends State<DigitalSignUp> {
       final dobStr = data['dateOfBirth'];
       dateOfBirth = dobStr != null ? DateTime.tryParse(dobStr) : null;
 
-      gender = data['gender'] ?? 'male';
+      _genderSelected = data['genderSelected'] == true;
+      gender = _restoreOptionalTextSelection(
+        data,
+        'gender',
+        'genderSelected',
+      );
       dependantsController.text = data['dependants'] ?? '';
-      maritalStatus = data['maritalStatus'] ?? 'single';
+      _maritalStatusSelected = data['maritalStatusSelected'] == true;
+      maritalStatus = _restoreOptionalTextSelection(
+        data,
+        'maritalStatus',
+        'maritalStatusSelected',
+      );
+      homeVillageController.text = data['homeVillageDetails'] ?? '';
       districtController.text = data['homeDistrict'] ?? '';
       traditionalAuthorityController.text =
           data['homeTraditionalAuthority'] ?? '';
@@ -455,6 +645,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
       physicalAddressController.text = data['physicalAddress'] ?? '';
       cityController.text = data['city'] ?? '';
       province = data['province'];
+      postalAddressController.text = data['postalAddress'] ?? '';
 
       workTelController.text = data['workTel'] ?? '';
       homeTelController.text = data['homeTel'] ?? '';
@@ -478,13 +669,23 @@ class DigitalSignUpState extends State<DigitalSignUp> {
       employerCodeController.text = data['employerCode'] ?? '';
       lengthYearsController.text = data['lengthYears'] ?? '';
       lengthMonthsController.text = data['lengthMonths'] ?? '';
-      employedFullTime = data['employedFullTime'] ?? true;
+      _employedFullTimeSelected = data['employedFullTimeSelected'] == true;
+      employedFullTime = _restoreOptionalBoolSelection(
+        data,
+        'employedFullTime',
+        'employedFullTimeSelected',
+      );
       grossAnnualController.text = data['grossAnnual'] ?? '';
       netMonthlyController.text = data['netMonthly'] ?? '';
       workAddressController.text = data['workAddress'] ?? '';
       workCityController.text = data['workCity'] ?? '';
       workProvince = data['workProvince'];
-      salaryFrequency = data['salaryFrequency'] ?? 'monthly';
+      _salaryFrequencySelected = data['salaryFrequencySelected'] == true;
+      salaryFrequency = _restoreOptionalTextSelection(
+        data,
+        'salaryFrequency',
+        'salaryFrequencySelected',
+      );
 
       final salaryDateStr = data['salaryPayDate'];
       salaryPayDate = salaryDateStr != null
@@ -496,12 +697,43 @@ class DigitalSignUpState extends State<DigitalSignUp> {
       branchNameController.text = data['branchName'] ?? '';
       branchCodeController.text = data['branchCode'] ?? '';
       accountNumberController.text = data['accountNumber'] ?? '';
-      accountType = data['accountType'] ?? 'current';
-      salaryPaidIntoAccount = data['salaryPaidIntoAccount'] ?? true;
+      _accountTypeSelected = data['accountTypeSelected'] == true;
+      accountType = _restoreOptionalTextSelection(
+        data,
+        'accountType',
+        'accountTypeSelected',
+      );
+      _salaryPaidIntoAccountSelected =
+          data['salaryPaidIntoAccountSelected'] == true;
+      salaryPaidIntoAccount = _restoreOptionalBoolSelection(
+        data,
+        'salaryPaidIntoAccount',
+        'salaryPaidIntoAccountSelected',
+      );
       accountUsageYearsController.text = data['accountUsageYears'] ?? '';
       accountUsageMonthsController.text = data['accountUsageMonths'] ?? '';
-      salaryTransferred3Months = data['salaryTransferred3Months'] ?? false;
+      _salaryTransferred3MonthsSelected =
+          data['salaryTransferred3MonthsSelected'] == true;
+      salaryTransferred3Months = _restoreOptionalBoolSelection(
+        data,
+        'salaryTransferred3Months',
+        'salaryTransferred3MonthsSelected',
+      );
 
+      baseLendingRateController.text = data['baseLendingRate'] ?? '';
+      effectiveInterestRateController.text =
+          data['effectiveInterestRate'] ?? '';
+      final firstInstalmentDateStr = data['firstInstalmentDate'];
+      firstInstalmentDate = firstInstalmentDateStr != null
+          ? DateTime.tryParse(firstInstalmentDateStr.toString())
+          : null;
+      final lastInstalmentDateStr = data['lastInstalmentDate'];
+      lastInstalmentDate = lastInstalmentDateStr != null
+          ? DateTime.tryParse(lastInstalmentDateStr.toString())
+          : null;
+      netPayController.text = data['netPay'] ?? '';
+      maxAllowedInstalmentController.text =
+          data['maxAllowedInstalment'] ?? '';
       totalAppliedController.text = data['totalApplied'] ?? '';
       totalApprovedController.text = data['totalApproved'] ?? '';
       cashToClientController.text = data['cashToClient'] ?? '';
@@ -512,6 +744,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
       monthlyInstalmentController.text = data['monthlyInstalment'] ?? '';
       loanpurpose = data['loanPurpose'];
       loanPurposeController.text = data['loanPurposeText'] ?? '';
+      referralAgentController.text = data['referralAgent'] ?? '';
 
       acceptedDeclaration = data['acceptedDeclaration'] ?? false;
 
@@ -576,6 +809,128 @@ class DigitalSignUpState extends State<DigitalSignUp> {
     });
   }
 
+  Future<void> _restoreStepPosition() async {
+    if (!_pageController.hasClients) return;
+    _pageController.jumpToPage(_currentStep);
+  }
+
+  void _scheduleDraftSave() {
+    unawaited(_saveDraftNow());
+  }
+
+  Future<void> _saveDraftNow() async {
+    if (_submittedToServer || _restoringDraft) return;
+
+    if (_draftSaveInFlight) {
+      _draftSaveQueued = true;
+      return;
+    }
+
+    _draftSaveInFlight = true;
+    try {
+      do {
+        _draftSaveQueued = false;
+        await _saveToDb('draft');
+      } while (_draftSaveQueued && !_submittedToServer && !_restoringDraft);
+    } finally {
+      _draftSaveInFlight = false;
+    }
+  }
+
+  void _registerDraftListeners() {
+    for (final controller in _allControllers) {
+      final fieldId = _controllerFieldIds[controller];
+      controller.addListener(() {
+        if (fieldId != null) {
+          _lastActiveField = fieldId;
+        }
+        _scheduleDraftSave();
+      });
+    }
+  }
+
+  void _unregisterDraftListeners() {
+    // Controller listeners are disposed with their controllers in dispose().
+  }
+
+  void _setDraftState(VoidCallback updates) {
+    if (!mounted) return;
+    setState(updates);
+    _scheduleDraftSave();
+  }
+
+  String _toTitleCase(String value) {
+    if (value.trim().isEmpty) return value;
+    return value
+        .split(' ')
+        .where((part) => part.isNotEmpty)
+        .map(
+          (part) =>
+              '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}',
+        )
+        .join(' ');
+  }
+
+  FocusNode _focusNode(String fieldId) {
+    return _focusNodes.putIfAbsent(fieldId, () {
+      final node = FocusNode(debugLabel: fieldId);
+      node.addListener(() {
+        if (node.hasFocus) {
+          _rememberField(fieldId);
+        }
+      });
+      return node;
+    });
+  }
+
+  void _rememberField(String fieldId) {
+    if (_lastActiveField == fieldId) return;
+    _lastActiveField = fieldId;
+    _scheduleDraftSave();
+  }
+
+  Future<void> _restoreLastActiveField() async {
+    final fieldId = _lastActiveField;
+    if (fieldId == null || fieldId.isEmpty) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final node = _focusNodes[fieldId];
+      if (node != null && node.canRequestFocus) {
+        FocusScope.of(context).requestFocus(node);
+      }
+    });
+  }
+
+  String? _restoreOptionalTextSelection(
+    Map<String, dynamic> data,
+    String valueKey,
+    String selectedKey,
+  ) {
+    final wasSelected = data[selectedKey] == true;
+    if (!wasSelected) return null;
+    final raw = data[valueKey];
+    final value = raw?.toString().trim();
+    if (value == null || value.isEmpty) return null;
+    return value;
+  }
+
+  bool? _restoreOptionalBoolSelection(
+    Map<String, dynamic> data,
+    String valueKey,
+    String selectedKey,
+  ) {
+    final wasSelected = data[selectedKey] == true;
+    if (!wasSelected) return null;
+    final raw = data[valueKey];
+    if (raw is bool) return raw;
+    if (raw is String) {
+      if (raw.toLowerCase() == 'true') return true;
+      if (raw.toLowerCase() == 'false') return false;
+    }
+    return null;
+  }
+
   Future<void> _saveToDb(String status) async {
     final now = DateTime.now();
     final reg = DigitalRegistration(
@@ -620,9 +975,9 @@ class DigitalSignUpState extends State<DigitalSignUp> {
         "first_name": firstNameController.text.toString(),
         "id_number": idNumberController.text.toString(),
         "date_of_birth": dateOfBirth?.toIso8601String() ?? '',
-        "gender": gender,
+        "gender": gender ?? '',
         "number_of_dependants": dependantsController.text.toString(),
-        "marital_status": maritalStatus,
+        "marital_status": maritalStatus ?? '',
         "home_village_details": homeVillageController.text.toString(),
         "district": districtController.text.toString(),
         "traditional_authority": traditionalAuthorityController.text.toString(),
@@ -654,14 +1009,14 @@ class DigitalSignUpState extends State<DigitalSignUp> {
         "work_address": workAddressController.text.toString(),
         "work_city": workCityController.text.toString(),
         "work_province": workProvince?.toString().toLowerCase() ?? '',
-        "work_salary_frequency": salaryFrequency,
+        "work_salary_frequency": salaryFrequency ?? '',
         "salary_pay_date": salaryPayDate?.toIso8601String() ?? '',
         "bank_name": bankNameController.text.toString(),
         "account_holder": accountHolderController.text.toString(),
         "branch_name": branchNameController.text.toString(),
         "branch_code": branchCodeController.text.toString(),
         "account_number": accountNumberController.text.toString(),
-        "account_type": accountType,
+        "account_type": accountType ?? '',
         "is_salary_paid_to_this_account": salaryPaidIntoAccount == true
             ? "1"
             : "0",
@@ -852,7 +1207,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
 
     if (file != null) {
       onSelected(File(file.path));
-      setState(() {});
+      _scheduleDraftSave();
     }
   }
 
@@ -927,14 +1282,18 @@ class DigitalSignUpState extends State<DigitalSignUp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     getToken();
 
     // ✅ Only load when an explicit draft is passed (from MyClients)
     if (widget.draftData != null) {
       _localId = widget.localId;
       _loadFromData(widget.draftData!);
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await _restoreStepPosition();
+        await _restoreLastActiveField();
+      });
     }
-    // no else: opening DigitalSignUp() -> always blank form
 
     // initialize signature controller
     _signatureController = SignatureController(
@@ -950,13 +1309,16 @@ class DigitalSignUpState extends State<DigitalSignUp> {
         setState(() => _signatureHasData = has);
       }
     });
+
+    _registerDraftListeners();
   }
 
-  Future<void> _loadDraftIfAny() async {
-    final draft = await DigitalRegistrationDb.instance.getLatestDraft();
-    if (draft != null) {
-      _localId = draft.id;
-      _loadFromData(draft.data);
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      unawaited(_saveDraftNow());
     }
   }
 
@@ -975,6 +1337,10 @@ class DigitalSignUpState extends State<DigitalSignUp> {
         if (surnameController.text.trim().isEmpty) missing.add('Surname');
         if (idNumberController.text.trim().isEmpty) missing.add('ID number');
         if (dateOfBirth == null) missing.add('Date of birth');
+        if (gender == null || gender!.isEmpty) missing.add('Gender');
+        if (maritalStatus == null || maritalStatus!.isEmpty) {
+          missing.add('Marital status');
+        }
         //write the district, tradional and village
         if (districtController.text.trim().isEmpty) missing.add('District');
         if (traditionalAuthorityController.text.trim().isEmpty)
@@ -1027,10 +1393,14 @@ class DigitalSignUpState extends State<DigitalSignUp> {
         //if (grossAnnualController.text.trim().isEmpty) missing.add('Gross annual salary');
         if (netMonthlyController.text.trim().isEmpty)
           missing.add('Net monthly income');
+        if (employedFullTime == null) missing.add('Full time staff selection');
         if (workCityController.text.trim().isEmpty)
           missing.add('Work city/town');
         if (workProvince == null || workProvince!.isEmpty)
           missing.add('Work region');
+        if (salaryFrequency == null || salaryFrequency!.isEmpty) {
+          missing.add('Salary frequency');
+        }
 
         break;
 
@@ -1047,6 +1417,12 @@ class DigitalSignUpState extends State<DigitalSignUp> {
         //if (accountUsageYearsController.text.trim().isEmpty) missing.add('Account usage (years)');
         if (accountType == null || accountType!.isEmpty)
           missing.add('Account type');
+        if (salaryPaidIntoAccount == null) {
+          missing.add('Salary paid into this account');
+        }
+        if (salaryTransferred3Months == null) {
+          missing.add('3 months salary transfer selection');
+        }
 
         break;
 
@@ -1130,6 +1506,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
       );
+      _scheduleDraftSave();
       return;
     }
 
@@ -1158,6 +1535,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
         duration: Duration(milliseconds: 300),
         curve: Curves.easeInOut,
       );
+      _scheduleDraftSave();
     }
   }
 
@@ -1302,6 +1680,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             SizedBox(height: 12),
             TextFormField(
               controller: systemInfoController,
+              focusNode: _focusNode('systemInfo'),
               decoration: InputDecoration(
                 labelText: 'System Information',
                 border: OutlineInputBorder(),
@@ -1323,7 +1702,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
               trailing: Icon(Icons.calendar_today),
               onTap: () async {
                 final d = await _pickDate(context, applicationDate);
-                if (d != null) setState(() => applicationDate = d);
+              if (d != null) _setDraftState(() => applicationDate = d);
               },
             ),
             SizedBox(height: 20),
@@ -1352,16 +1731,17 @@ class DigitalSignUpState extends State<DigitalSignUp> {
               title: Text('Government Employee Payroll'),
               value: appTypeGovernmentPayroll,
               onChanged: (v) =>
-                  setState(() => appTypeGovernmentPayroll = v ?? false),
+                  _setDraftState(() => appTypeGovernmentPayroll = v ?? false),
             ),
             CheckboxListTile(
               title: Text('Short Term Private'),
               value: appTypeShortTermPrivate,
               onChanged: (v) =>
-                  setState(() => appTypeShortTermPrivate = v ?? false),
+                  _setDraftState(() => appTypeShortTermPrivate = v ?? false),
             ),
             TextFormField(
               controller: psmReservationNumberController,
+              focusNode: _focusNode('psmReservationNumber'),
               decoration: InputDecoration(
                 labelText: 'PSM Reservation Number',
                 border: OutlineInputBorder(),
@@ -1416,12 +1796,16 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                     ),
                   )
                   .toList(),
-              onChanged: (v) => setState(() => titleValue = v),
+              onChanged: (v) => _setDraftState(() {
+                _rememberField('title');
+                titleValue = v;
+              }),
             ),
 
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: firstNameController,
+              focusNode: _focusNode('firstName'),
               decoration: InputDecoration(
                 labelText: 'First Name',
                 border: OutlineInputBorder(
@@ -1444,6 +1828,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: surnameController,
+              focusNode: _focusNode('surname'),
               decoration: InputDecoration(
                 labelText: 'Surname',
                 border: OutlineInputBorder(
@@ -1466,6 +1851,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: idNumberController,
+              focusNode: _focusNode('idNumber'),
               decoration: InputDecoration(
                 labelText: 'ID Number',
                 border: OutlineInputBorder(
@@ -1490,7 +1876,12 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             InkWell(
             onTap: () async {
               final d = await _pickDate(context, dateOfBirth);
-              if (d != null) setState(() => dateOfBirth = d);
+              if (d != null) {
+                _setDraftState(() {
+                  _rememberField('dateOfBirth');
+                  dateOfBirth = d;
+                });
+              }
             },
             child: InputDecorator(
               decoration: InputDecoration(
@@ -1524,13 +1915,21 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                 Radio<String>(
                   value: 'male',
                   groupValue: gender,
-                  onChanged: (v) => setState(() => gender = v!),
+                  onChanged: (v) => _setDraftState(() {
+                    _rememberField('gender');
+                    _genderSelected = v != null;
+                    gender = v;
+                  }),
                 ),
                 Text('Male'),
                 Radio<String>(
                   value: 'female',
                   groupValue: gender,
-                  onChanged: (v) => setState(() => gender = v!),
+                  onChanged: (v) => _setDraftState(() {
+                    _rememberField('gender');
+                    _genderSelected = v != null;
+                    gender = v;
+                  }),
                 ),
                 Text('Female'),
               ],
@@ -1540,6 +1939,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             
             TextFormField(
               controller: dependantsController,
+              focusNode: _focusNode('dependants'),
               decoration: InputDecoration(
                 labelText: 'Number of Dependants',
                 border: OutlineInputBorder(
@@ -1584,14 +1984,23 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                 'single',
                 'married',
                 'divorced',
-              ].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-              onChanged: (v) =>
-                  setState(() => maritalStatus = v ?? maritalStatus),
+              ].map(
+                (t) => DropdownMenuItem(
+                  value: t,
+                  child: Text(_toTitleCase(t)),
+                ),
+              ).toList(),
+              onChanged: (v) => _setDraftState(() {
+                _rememberField('maritalStatus');
+                _maritalStatusSelected = v != null;
+                maritalStatus = v;
+              }),
             ),
 
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: districtController,
+              focusNode: _focusNode('district'),
               decoration: InputDecoration(
                 labelText: 'Home District',
                 border: OutlineInputBorder(
@@ -1614,6 +2023,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
 
             TextFormField(
               controller: traditionalAuthorityController,
+              focusNode: _focusNode('traditionalAuthority'),
               decoration: InputDecoration(
                 labelText: 'Home Traditional Authority',
                 border: OutlineInputBorder(
@@ -1636,6 +2046,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
 
             TextFormField(
               controller: villageController,
+              focusNode: _focusNode('village'),
               decoration: InputDecoration(
                 labelText: 'Home Village',
                 border: OutlineInputBorder(
@@ -1678,6 +2089,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             SizedBox(height: 12),
             TextFormField(
               controller: physicalAddressController,
+              focusNode: _focusNode('physicalAddress'),
               decoration: InputDecoration(
                 labelText: 'Physical Address',
                 border: OutlineInputBorder(
@@ -1699,6 +2111,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: cityController,
+              focusNode: _focusNode('city'),
               decoration: InputDecoration(
                 labelText: 'City/Town',
                 border: OutlineInputBorder(
@@ -1742,7 +2155,10 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                 'Central',
                 'Southern',
               ].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-              onChanged: (v) => setState(() => province = v),
+              onChanged: (v) => _setDraftState(() {
+                _rememberField('province');
+                province = v;
+              }),
             ),
             const SizedBox(height: _digitalSignUpFieldGap),
             //TextFormField(controller: postalAddressController, decoration: InputDecoration(labelText: 'Postal Address', border: OutlineInputBorder(),)),
@@ -1770,6 +2186,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             SizedBox(height: 12),
             TextFormField(
               controller: workTelController,
+              focusNode: _focusNode('workTel'),
               decoration: InputDecoration(
                 labelText: 'Work Tel. No',
                 border: OutlineInputBorder(
@@ -1792,6 +2209,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: homeTelController,
+              focusNode: _focusNode('homeTel'),
               decoration: InputDecoration(
                 labelText: 'Home Tel. No(optional)',
                 border: OutlineInputBorder(
@@ -1814,6 +2232,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: mobile1Controller,
+              focusNode: _focusNode('mobile1'),
               decoration: InputDecoration(
                 labelText: 'Mobile Tel No 1',
                 border: OutlineInputBorder(
@@ -1836,6 +2255,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: mobile2Controller,
+              focusNode: _focusNode('mobile2'),
               decoration: InputDecoration(
                 labelText: 'Mobile Tel No 2(optional)',
                 border: OutlineInputBorder(
@@ -1858,6 +2278,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: email1Controller,
+              focusNode: _focusNode('email1'),
               decoration: InputDecoration(
                 labelText: 'Email Address 1(optional)',
                 border: OutlineInputBorder(
@@ -1880,6 +2301,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: email2Controller,
+              focusNode: _focusNode('email2'),
               decoration: InputDecoration(
                 labelText: 'Email Address 2(optional)',
                 border: OutlineInputBorder(
@@ -1923,6 +2345,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             SizedBox(height: 12),
             TextFormField(
               controller: famSurnameController,
+              focusNode: _focusNode('famSurname'),
               decoration: InputDecoration(
                 labelText: 'Surname',
                 border: OutlineInputBorder(
@@ -1944,6 +2367,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: famFirstNameController,
+              focusNode: _focusNode('famFirstName'),
               decoration: InputDecoration(
                 labelText: 'First Name',
                 border: OutlineInputBorder(
@@ -1991,7 +2415,8 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                   )
                   .toList(),
               onChanged: (v) {
-                setState(() {
+                _setDraftState(() {
+                  _rememberField('famTitle');
                   famTitle = v; // keep the lowercase value
                 });
               },
@@ -2001,6 +2426,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
 
             TextFormField(
               controller: famRelationController,
+              focusNode: _focusNode('famRelation'),
               decoration: InputDecoration(
                 labelText: 'Relation',
                 border: OutlineInputBorder(
@@ -2023,6 +2449,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
 
             TextFormField(
               controller: famHomeTelController,
+              focusNode: _focusNode('famHomeTel'),
               decoration: InputDecoration(
                 labelText: 'Home Tel no(Optional)',
                 border: OutlineInputBorder(
@@ -2046,6 +2473,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: famMobileController,
+              focusNode: _focusNode('famMobile'),
               decoration: InputDecoration(
                 labelText: 'Mobile Tel no',
                 border: OutlineInputBorder(
@@ -2069,6 +2497,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: famAddressController,
+              focusNode: _focusNode('famAddress'),
               decoration: InputDecoration(
                 labelText: 'Address',
                 border: OutlineInputBorder(
@@ -2111,6 +2540,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             SizedBox(height: 12),
             TextFormField(
               controller: employerNameController,
+              focusNode: _focusNode('employerName'),
               decoration: InputDecoration(
                 labelText: 'Name of Employer / Ministry',
                 border: OutlineInputBorder(
@@ -2132,6 +2562,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: employerSpecificController,
+              focusNode: _focusNode('employerSpecific'),
               decoration: InputDecoration(
                 labelText: 'Specific Employer',
                 border: OutlineInputBorder(
@@ -2153,6 +2584,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: departmentController,
+              focusNode: _focusNode('department'),
               decoration: InputDecoration(
                 labelText: 'Department',
                 border: OutlineInputBorder(
@@ -2174,6 +2606,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: jobTitleController,
+              focusNode: _focusNode('jobTitle'),
               decoration: InputDecoration(
                 labelText: 'Job Title',
                 border: OutlineInputBorder(
@@ -2195,6 +2628,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: employerCodeController,
+              focusNode: _focusNode('employerCode'),
               decoration: InputDecoration(
                 labelText: 'Employer Code / Payroll No',
                 border: OutlineInputBorder(
@@ -2219,6 +2653,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                 Expanded(
                   child: TextFormField(
                     controller: lengthYearsController,
+                    focusNode: _focusNode('lengthYears'),
                     decoration: InputDecoration(
                       labelText: 'Length of Service (years)',
                 border: OutlineInputBorder(
@@ -2243,6 +2678,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                 Expanded(
                   child: TextFormField(
                     controller: lengthMonthsController,
+                    focusNode: _focusNode('lengthMonths'),
                     decoration: InputDecoration(
                       labelText: 'Months',
                 border: OutlineInputBorder(
@@ -2272,19 +2708,28 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                 Radio<bool>(
                   value: true,
                   groupValue: employedFullTime,
-                  onChanged: (v) => setState(() => employedFullTime = v!),
+                  onChanged: (v) => _setDraftState(() {
+                    _rememberField('employedFullTime');
+                    _employedFullTimeSelected = v != null;
+                    employedFullTime = v;
+                  }),
                 ),
                 Text('Yes'),
                 Radio<bool>(
                   value: false,
                   groupValue: employedFullTime,
-                  onChanged: (v) => setState(() => employedFullTime = v!),
+                  onChanged: (v) => _setDraftState(() {
+                    _rememberField('employedFullTime');
+                    _employedFullTimeSelected = v != null;
+                    employedFullTime = v;
+                  }),
                 ),
                 Text('No'),
               ],
             ),
             TextFormField(
               controller: grossAnnualController,
+              focusNode: _focusNode('grossAnnual'),
               decoration: InputDecoration(
                 labelText: 'Gross Annual Salary(optional)',
                 border: OutlineInputBorder(
@@ -2307,6 +2752,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: netMonthlyController,
+              focusNode: _focusNode('netMonthly'),
               decoration: InputDecoration(
                 labelText: 'Net Monthly Income',
                 border: OutlineInputBorder(
@@ -2329,6 +2775,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: workAddressController,
+              focusNode: _focusNode('workAddress'),
               decoration: InputDecoration(
                 labelText: 'Work Address',
                 border: OutlineInputBorder(
@@ -2350,6 +2797,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: workCityController,
+              focusNode: _focusNode('workCity'),
               decoration: InputDecoration(
                 labelText: 'City / Town',
                 border: OutlineInputBorder(
@@ -2393,7 +2841,10 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                 'Central',
                 'Southern',
               ].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-              onChanged: (v) => setState(() => workProvince = v),
+              onChanged: (v) => _setDraftState(() {
+                _rememberField('workProvince');
+                workProvince = v;
+              }),
             ),
             const SizedBox(height: _digitalSignUpFieldGap),
             DropdownButtonFormField<String>(
@@ -2419,9 +2870,17 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                 'monthly',
                 'weekly',
                 'other',
-              ].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-              onChanged: (v) =>
-                  setState(() => salaryFrequency = v ?? salaryFrequency),
+              ].map(
+                (p) => DropdownMenuItem(
+                  value: p,
+                  child: Text(_toTitleCase(p)),
+                ),
+              ).toList(),
+              onChanged: (v) => _setDraftState(() {
+                _rememberField('salaryFrequency');
+                _salaryFrequencySelected = v != null;
+                salaryFrequency = v;
+              }),
             ),
             ListTile(
               contentPadding: EdgeInsets.zero,
@@ -2438,7 +2897,12 @@ class DigitalSignUpState extends State<DigitalSignUp> {
               trailing: Icon(Icons.calendar_today),
               onTap: () async {
                 final d = await _pickDate(context, salaryPayDate);
-                if (d != null) setState(() => salaryPayDate = d);
+              if (d != null) {
+                _setDraftState(() {
+                  _rememberField('salaryPayDate');
+                  salaryPayDate = d;
+                });
+              }
               },
             ),
             SizedBox(height: 20),
@@ -2465,6 +2929,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             SizedBox(height: 12),
             TextFormField(
               controller: bankNameController,
+              focusNode: _focusNode('bankName'),
               decoration: InputDecoration(
                 labelText: 'Bank Name',
                 border: OutlineInputBorder(
@@ -2486,6 +2951,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: accountHolderController,
+              focusNode: _focusNode('accountHolder'),
               decoration: InputDecoration(
                 labelText: 'Account Holder',
                 border: OutlineInputBorder(
@@ -2507,6 +2973,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: branchNameController,
+              focusNode: _focusNode('branchName'),
               decoration: InputDecoration(
                 labelText: 'Branch Name',
                 border: OutlineInputBorder(
@@ -2528,6 +2995,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: branchCodeController,
+              focusNode: _focusNode('branchCode'),
               decoration: InputDecoration(
                 labelText: 'Branch Code(Optional)',
                 border: OutlineInputBorder(
@@ -2549,6 +3017,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             const SizedBox(height: _digitalSignUpFieldGap),
             TextFormField(
               controller: accountNumberController,
+              focusNode: _focusNode('accountNumber'),
               decoration: InputDecoration(
                 labelText: 'Account Number',
                 border: OutlineInputBorder(
@@ -2591,8 +3060,17 @@ class DigitalSignUpState extends State<DigitalSignUp> {
               items: [
                 'current',
                 'savings',
-              ].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-              onChanged: (v) => setState(() => accountType = v ?? accountType),
+              ].map(
+                (t) => DropdownMenuItem(
+                  value: t,
+                  child: Text(_toTitleCase(t)),
+                ),
+              ).toList(),
+              onChanged: (v) => _setDraftState(() {
+                _rememberField('accountType');
+                _accountTypeSelected = v != null;
+                accountType = v;
+              }),
             ),
             const SizedBox(height: _digitalSignUpFieldGap),
             Text('Is salary paid into this account?'),
@@ -2601,13 +3079,21 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                 Radio<bool>(
                   value: true,
                   groupValue: salaryPaidIntoAccount,
-                  onChanged: (v) => setState(() => salaryPaidIntoAccount = v!),
+                  onChanged: (v) => _setDraftState(() {
+                    _rememberField('salaryPaidIntoAccount');
+                    _salaryPaidIntoAccountSelected = v != null;
+                    salaryPaidIntoAccount = v;
+                  }),
                 ),
                 Text('Yes'),
                 Radio<bool>(
                   value: false,
                   groupValue: salaryPaidIntoAccount,
-                  onChanged: (v) => setState(() => salaryPaidIntoAccount = v!),
+                  onChanged: (v) => _setDraftState(() {
+                    _rememberField('salaryPaidIntoAccount');
+                    _salaryPaidIntoAccountSelected = v != null;
+                    salaryPaidIntoAccount = v;
+                  }),
                 ),
                 Text('No'),
               ],
@@ -2617,6 +3103,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                 Expanded(
                   child: TextFormField(
                     controller: accountUsageYearsController,
+                    focusNode: _focusNode('accountUsageYears'),
                     decoration: InputDecoration(
                       labelText: 'Usage (years)',
                 border: OutlineInputBorder(
@@ -2641,6 +3128,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                 Expanded(
                   child: TextFormField(
                     controller: accountUsageMonthsController,
+                    focusNode: _focusNode('accountUsageMonths'),
                     decoration: InputDecoration(
                       labelText: 'Months',
                 border: OutlineInputBorder(
@@ -2670,15 +3158,21 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                 Radio<bool>(
                   value: true,
                   groupValue: salaryTransferred3Months,
-                  onChanged: (v) =>
-                      setState(() => salaryTransferred3Months = v!),
+                  onChanged: (v) => _setDraftState(() {
+                    _rememberField('salaryTransferred3Months');
+                    _salaryTransferred3MonthsSelected = v != null;
+                    salaryTransferred3Months = v;
+                  }),
                 ),
                 Text('Yes'),
                 Radio<bool>(
                   value: false,
                   groupValue: salaryTransferred3Months,
-                  onChanged: (v) =>
-                      setState(() => salaryTransferred3Months = v!),
+                  onChanged: (v) => _setDraftState(() {
+                    _rememberField('salaryTransferred3Months');
+                    _salaryTransferred3MonthsSelected = v != null;
+                    salaryTransferred3Months = v;
+                  }),
                 ),
                 Text('No'),
               ],
@@ -2743,6 +3237,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                     );
                     if (img != null) {
                       onCapture(File(img.path));
+                      _scheduleDraftSave();
                     }
                   },
                   icon: const Icon(Icons.camera_alt, size: 18),
@@ -2966,6 +3461,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
 
             TextFormField(
               controller: totalAppliedController,
+              focusNode: _focusNode('totalApplied'),
               decoration: InputDecoration(
                 labelText: 'Total Applied For',
                 border: OutlineInputBorder(
@@ -3032,6 +3528,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             SizedBox(height: 20),
             TextFormField(
               controller: loanPeriodController,
+              focusNode: _focusNode('loanPeriod'),
               decoration: InputDecoration(
                 labelText: 'Loan Period (months)',
                 border: OutlineInputBorder(
@@ -3054,6 +3551,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             SizedBox(height: 20),
             TextFormField(
               controller: adminFeeController,
+              focusNode: _focusNode('adminFee'),
               decoration: InputDecoration(
                 labelText: 'Admin Fee',
                 border: OutlineInputBorder(
@@ -3076,6 +3574,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             SizedBox(height: 20),
             TextFormField(
               controller: interestController,
+              focusNode: _focusNode('interest'),
               decoration: InputDecoration(
                 labelText: 'Interest',
                 border: OutlineInputBorder(
@@ -3098,6 +3597,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             SizedBox(height: 20),
             TextFormField(
               controller: totalCollectableController,
+              focusNode: _focusNode('totalCollectable'),
               decoration: InputDecoration(
                 labelText: 'Total Collectable',
                 border: OutlineInputBorder(
@@ -3120,6 +3620,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             SizedBox(height: 20),
             TextFormField(
               controller: monthlyInstalmentController,
+              focusNode: _focusNode('monthlyInstalment'),
               decoration: InputDecoration(
                 labelText: 'Monthly Instalment',
                 border: OutlineInputBorder(
@@ -3171,7 +3672,8 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                       )
                       .toList(),
               onChanged: (v) {
-                setState(() {
+                _setDraftState(() {
+                  _rememberField('loanPurpose');
                   loanpurpose = v;
                 });
               },
@@ -3181,6 +3683,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
             if (loanpurpose == 'other')
               TextFormField(
                 controller: loanPurposeController,
+                focusNode: _focusNode('loanPurposeText'),
                 decoration: InputDecoration(
                   labelText: 'Specifying Loan Purpose',
                   border: OutlineInputBorder(),
@@ -3282,8 +3785,10 @@ class DigitalSignUpState extends State<DigitalSignUp> {
               children: [
                 Checkbox(
                   value: acceptedDeclaration,
-                  onChanged: (v) =>
-                      setState(() => acceptedDeclaration = v ?? false),
+                  onChanged: (v) => _setDraftState(() {
+                    _rememberField('acceptedDeclaration');
+                    acceptedDeclaration = v ?? false;
+                  }),
                 ),
                 Flexible(child: Text('I accept the declaration above')),
               ],
@@ -3330,7 +3835,10 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                   _reviewRow('Date of Birth', _fmtDate(dateOfBirth)),
                   _reviewRow('Gender', gender),
                   _reviewRow('No. of Dependants', dependantsController.text),
-                  _reviewRow('Marital Status', maritalStatus),
+                  _reviewRow(
+                    'Marital Status',
+                    maritalStatus == null ? null : _toTitleCase(maritalStatus!),
+                  ),
                   _reviewRow('Home District', districtController.text),
                   _reviewRow('Home TA', traditionalAuthorityController.text),
                   _reviewRow('Home Village', villageController.text),
@@ -3425,14 +3933,21 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                   ),
                   _reviewRow(
                     'Full Time Staff',
-                    employedFullTime ? 'Yes' : 'No',
+                    employedFullTime == null
+                        ? null
+                        : (employedFullTime! ? 'Yes' : 'No'),
                   ),
                   _reviewRow('Gross Annual Salary', grossAnnualController.text),
                   _reviewRow('Net Monthly Income', netMonthlyController.text),
                   _reviewRow('Work Address', workAddressController.text),
                   _reviewRow('Work City/Town', workCityController.text),
                   _reviewRow('Work Region', workProvince),
-                  _reviewRow('Salary Frequency', salaryFrequency),
+                  _reviewRow(
+                    'Salary Frequency',
+                    salaryFrequency == null
+                        ? null
+                        : _toTitleCase(salaryFrequency!),
+                  ),
                   _reviewRow('Salary Pay Date', _fmtDate(salaryPayDate)),
                 ],
               ),
@@ -3451,10 +3966,15 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                   _reviewRow('Branch Name', branchNameController.text),
                   _reviewRow('Branch Code', branchCodeController.text),
                   _reviewRow('Account Number', accountNumberController.text),
-                  _reviewRow('Account Type', accountType),
+                  _reviewRow(
+                    'Account Type',
+                    accountType == null ? null : _toTitleCase(accountType!),
+                  ),
                   _reviewRow(
                     'Salary Paid Into Account',
-                    salaryPaidIntoAccount ? 'Yes' : 'No',
+                    salaryPaidIntoAccount == null
+                        ? null
+                        : (salaryPaidIntoAccount! ? 'Yes' : 'No'),
                   ),
                   _reviewRow('Usage (years)', accountUsageYearsController.text),
                   _reviewRow(
@@ -3463,7 +3983,9 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                   ),
                   _reviewRow(
                     'Salary transferred 3 months',
-                    salaryTransferred3Months ? 'Yes' : 'No',
+                    salaryTransferred3Months == null
+                        ? null
+                        : (salaryTransferred3Months! ? 'Yes' : 'No'),
                   ),
                 ],
               ),
@@ -3538,7 +4060,7 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                         ? null
                         : loanpurpose == 'other'
                         ? loanPurposeController.text
-                        : loanpurpose,
+                        : _toTitleCase(loanpurpose!),
                   ),
                 ],
               ),
@@ -3568,6 +4090,11 @@ class DigitalSignUpState extends State<DigitalSignUp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _unregisterDraftListeners();
+    for (final node in _focusNodes.values) {
+      node.dispose();
+    }
     _pageController.dispose();
     // Dispose controllers
     systemInfoController.dispose();
@@ -3625,7 +4152,6 @@ class DigitalSignUpState extends State<DigitalSignUp> {
     bankStatementFileName = null;
     employerLetterFileName = null;
     // dispose signature controller
-    _signatureController.removeListener(() {}); // in case
     _signatureController.dispose();
 
     super.dispose();
@@ -3635,7 +4161,6 @@ class DigitalSignUpState extends State<DigitalSignUp> {
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        // user is moving out without necessarily submitting
         if (!_submittedToServer) {
           await _saveToDb('draft');
         }
@@ -3675,7 +4200,10 @@ class DigitalSignUpState extends State<DigitalSignUp> {
                       controller: _pageController,
                       physics: const NeverScrollableScrollPhysics(),
                       children: _steps,
-                      onPageChanged: (i) => setState(() => _currentStep = i),
+                      onPageChanged: (i) {
+                        setState(() => _currentStep = i);
+                        _scheduleDraftSave();
+                      },
                     ),
                   ),
                 ],
