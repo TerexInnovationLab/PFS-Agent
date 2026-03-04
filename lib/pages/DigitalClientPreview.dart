@@ -36,11 +36,21 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
   /// ✅ Extract server/client id from preview payload
   /// Supports: {id: 1}, {client_id: 1}, {data:{id:1}}, {data:{client_id:1}}
   String? _extractClientId(Map<String, dynamic> raw) {
-    dynamic v = raw['id'] ?? raw['client_id'];
+    dynamic v =
+        raw['id'] ??
+        raw['client_id'] ??
+        raw['id_number'] ??
+        raw['idNumber'] ??
+        raw['server_id'];
 
     if (v == null && raw['data'] is Map<String, dynamic>) {
       final inner = raw['data'] as Map<String, dynamic>;
-      v = inner['id'] ?? inner['client_id'];
+      v =
+          inner['id'] ??
+          inner['client_id'] ??
+          inner['id_number'] ??
+          inner['idNumber'] ??
+          inner['server_id'];
     }
 
     if (v == null) return null;
@@ -68,10 +78,7 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
       padding: const EdgeInsets.only(top: 16.0, bottom: 4.0),
       child: Text(
         text,
-        style: const TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.bold,
-        ),
+        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
       ),
     );
   }
@@ -99,10 +106,7 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
             ),
           ),
           const SizedBox(width: 6),
-          Expanded(
-            flex: 3,
-            child: Text(display),
-          ),
+          Expanded(flex: 3, child: Text(display)),
         ],
       ),
     );
@@ -127,10 +131,7 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
           children: [
             Text(
               label,
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: 14,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
             ),
             const SizedBox(height: 8),
             hasPath && (isRemote || hasLocalFile)
@@ -161,10 +162,7 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
                                   ),
                                 ),
                               )
-                            : Image.file(
-                                file!,
-                                fit: BoxFit.cover,
-                              ),
+                            : Image.file(file!, fit: BoxFit.cover),
                       ),
                     ),
                   )
@@ -282,8 +280,10 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
                   ),
                 ),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 4,
+                    horizontal: 10,
+                  ),
                   decoration: BoxDecoration(
                     color: statusColor.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
@@ -313,10 +313,7 @@ class DigitalClientPreviewState extends State<DigitalClientPreview> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.info_outline,
-                        color: Colors.red[700],
-                      ),
+                      Icon(Icons.info_outline, color: Colors.red[700]),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(

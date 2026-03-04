@@ -22,16 +22,12 @@ import 'Home.dart';
 
 class DigitalSignUpBounced extends StatefulWidget {
   final Map<String, dynamic>? draftData;
-  
 
   // ✅ NEW: data passed from DigitalClientPreview
   final Map<String, dynamic>? clientPreviewData;
 
   // ✅ NEW: server/client id to be used in URL: /client/{id}
   final String? clientId;
-
-
-  
 
   const DigitalSignUpBounced({
     Key? key,
@@ -52,9 +48,8 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
   int? _localId; // ID of the record in SQLite
   bool _submittedToServer = false;
 
- // ✅ NEW: store preview/server client id in state too (optional, but useful)
+  // ✅ NEW: store preview/server client id in state too (optional, but useful)
   String? _clientIdFromPreview;
-
 
   // --- Signature capture state ---
   late final SignatureController _signatureController;
@@ -80,9 +75,9 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
   final TextEditingController firstNameController = TextEditingController();
   final TextEditingController idNumberController = TextEditingController();
   DateTime? dateOfBirth;
-  String gender = 'male';
+  String? gender;
   final TextEditingController dependantsController = TextEditingController();
-  String maritalStatus = 'single';
+  String? maritalStatus;
   final TextEditingController homeVillageController = TextEditingController();
   final TextEditingController villageController = TextEditingController();
   final TextEditingController districtController = TextEditingController();
@@ -122,13 +117,13 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
   final TextEditingController employerCodeController = TextEditingController();
   final TextEditingController lengthYearsController = TextEditingController();
   final TextEditingController lengthMonthsController = TextEditingController();
-  bool employedFullTime = true;
+  bool? employedFullTime;
   final TextEditingController grossAnnualController = TextEditingController();
   final TextEditingController netMonthlyController = TextEditingController();
   final TextEditingController workAddressController = TextEditingController();
   final TextEditingController workCityController = TextEditingController();
   String? workProvince;
-  String salaryFrequency = 'monthly';
+  String? salaryFrequency;
   DateTime? salaryPayDate;
 
   // 8. Banking details
@@ -137,8 +132,8 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
   final TextEditingController branchNameController = TextEditingController();
   final TextEditingController branchCodeController = TextEditingController();
   final TextEditingController accountNumberController = TextEditingController();
-  String accountType = 'current';
-  bool salaryPaidIntoAccount = true;
+  String? accountType;
+  bool? salaryPaidIntoAccount;
   final TextEditingController accountUsageYearsController =
       TextEditingController();
   final TextEditingController accountUsageMonthsController =
@@ -457,38 +452,169 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
     };
   }
 
+  String? _readStringValue(Map<String, dynamic> data, List<String> keys) {
+    for (final key in keys) {
+      final value = data[key];
+      if (value == null) continue;
+      final text = value.toString().trim();
+      if (text.isNotEmpty && text.toLowerCase() != 'null') return text;
+    }
+    return null;
+  }
+
+  bool? _readBoolValue(Map<String, dynamic> data, List<String> keys) {
+    for (final key in keys) {
+      final value = data[key];
+      if (value == null) continue;
+      if (value is bool) return value;
+      final normalized = value.toString().trim().toLowerCase();
+      if (normalized == 'true' || normalized == '1' || normalized == 'yes') {
+        return true;
+      }
+      if (normalized == 'false' || normalized == '0' || normalized == 'no') {
+        return false;
+      }
+    }
+    return null;
+  }
+
+  String _titleCase(String? value) {
+    final raw = value?.trim() ?? '';
+    if (raw.isEmpty) return '';
+    return raw
+        .split(' ')
+        .where((part) => part.isNotEmpty)
+        .map(
+          (part) =>
+              '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}',
+        )
+        .join(' ');
+  }
+
+  String _compactChoice(String value) {
+    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+  }
+
+  String? _mapToAllowedChoice(String? raw, List<String> allowed) {
+    if (raw == null) return null;
+    final normalizedRaw = _compactChoice(raw.trim());
+    if (normalizedRaw.isEmpty) return null;
+    for (final option in allowed) {
+      if (_compactChoice(option) == normalizedRaw) return option;
+    }
+    return null;
+  }
+
+  String? _extractComparableId(Map<String, dynamic> data) {
+    return _readStringValue(data, [
+      'id',
+      'client_id',
+      'id_number',
+      'server_id',
+    ]);
+  }
+
+  Future<Map<String, dynamic>?> _loadLocalDataByClientId(
+    String clientId,
+  ) async {
+    final normalizedClientId = clientId.trim().toLowerCase();
+    if (normalizedClientId.isEmpty) return null;
+
+    final rows = await DigitalRegistrationDb.instance.getAll();
+    for (final row in rows) {
+      final rowId = _extractComparableId(row.data)?.trim().toLowerCase();
+      if (rowId == null || rowId.isEmpty) continue;
+      if (rowId == normalizedClientId) {
+        _localId = row.id;
+        return Map<String, dynamic>.from(row.data);
+      }
+    }
+    return null;
+  }
+
+  Future<void> _loadInitialFormData() async {
+    Map<String, dynamic>? sourceData;
+
+    if (widget.draftData != null) {
+      sourceData = Map<String, dynamic>.from(widget.draftData!);
+    }
+
+    final currentClientId = id;
+    if (sourceData == null &&
+        currentClientId != null &&
+        currentClientId.trim().isNotEmpty) {
+      sourceData = await _loadLocalDataByClientId(currentClientId);
+    }
+
+    if (sourceData == null && widget.clientPreviewData != null) {
+      sourceData = Map<String, dynamic>.from(widget.clientPreviewData!);
+    }
+
+    if (!mounted || sourceData == null) return;
+    _loadFromData(sourceData);
+  }
+
   void _loadFromData(Map<String, dynamic> data) {
     setState(() {
-      titleValue = data['titleValue'];
-      surnameController.text = data['surname'] ?? '';
-      firstNameController.text = data['firstName'] ?? '';
-      idNumberController.text = data['idNumber'] ?? '';
+      titleValue = _mapToAllowedChoice(
+        _readStringValue(data, ['titleValue', 'title']),
+        const ['mr', 'mrs', 'miss', 'dr', 'prof'],
+      );
+      surnameController.text = _readStringValue(data, ['surname']) ?? '';
+      firstNameController.text =
+          _readStringValue(data, ['firstName', 'first_name']) ?? '';
+      idNumberController.text =
+          _readStringValue(data, ['idNumber', 'id_number']) ?? '';
 
-      final dobStr = data['dateOfBirth'];
+      final dobStr = _readStringValue(data, ['dateOfBirth', 'date_of_birth']);
       dateOfBirth = dobStr != null ? DateTime.tryParse(dobStr) : null;
 
-      gender = data['gender'] ?? 'male';
-      dependantsController.text = data['dependants'] ?? '';
-      maritalStatus = data['maritalStatus'] ?? 'single';
-      districtController.text = data['homeDistrict'] ?? '';
+      gender = _mapToAllowedChoice(_readStringValue(data, ['gender']), const [
+        'male',
+        'female',
+      ]);
+      dependantsController.text =
+          _readStringValue(data, ['dependants', 'number_of_dependants']) ?? '';
+      maritalStatus = _mapToAllowedChoice(
+        _readStringValue(data, ['maritalStatus', 'marital_status']),
+        const ['single', 'married', 'divorced'],
+      );
+      districtController.text =
+          _readStringValue(data, ['homeDistrict', 'district']) ?? '';
       traditionalAuthorityController.text =
-          data['homeTraditionalAuthority'] ?? '';
-      villageController.text = data['homeVillage'] ?? '';
+          _readStringValue(data, [
+            'homeTraditionalAuthority',
+            'traditional_authority',
+          ]) ??
+          '';
+      villageController.text =
+          _readStringValue(data, ['homeVillage', 'village']) ?? '';
 
-      physicalAddressController.text = data['physicalAddress'] ?? '';
-      cityController.text = data['city'] ?? '';
-      province = data['province'];
+      physicalAddressController.text =
+          _readStringValue(data, ['physicalAddress', 'physical_address']) ?? '';
+      cityController.text = _readStringValue(data, ['city', 'town']) ?? '';
+      province = _mapToAllowedChoice(
+        _readStringValue(data, ['province']),
+        const ['Northern', 'Central', 'Southern'],
+      );
 
-      workTelController.text = data['workTel'] ?? '';
-      homeTelController.text = data['homeTel'] ?? '';
-      mobile1Controller.text = data['mobile1'] ?? '';
-      mobile2Controller.text = data['mobile2'] ?? '';
-      email1Controller.text = data['email1'] ?? '';
-      email2Controller.text = data['email2'] ?? '';
+      workTelController.text =
+          _readStringValue(data, ['workTel', 'work_tel_no']) ?? '';
+      homeTelController.text =
+          _readStringValue(data, ['homeTel', 'home_tel_no']) ?? '';
+      mobile1Controller.text =
+          _readStringValue(data, ['mobile1', 'mobile_tel_no1']) ?? '';
+      mobile2Controller.text =
+          _readStringValue(data, ['mobile2', 'mobile_tel_no2']) ?? '';
+      email1Controller.text = _readStringValue(data, ['email1']) ?? '';
+      email2Controller.text = _readStringValue(data, ['email2']) ?? '';
 
       famSurnameController.text = data['famSurname'] ?? '';
       famFirstNameController.text = data['famFirstName'] ?? '';
-      famTitle = data['famTitle'];
+      famTitle = _mapToAllowedChoice(
+        _readStringValue(data, ['famTitle', 'fam_title']),
+        const ['mr', 'mrs', 'miss', 'dr'],
+      );
       famRelationController.text = data['famRelation'] ?? '';
       famHomeTelController.text = data['famHomeTel'] ?? '';
       famMobileController.text = data['famMobile'] ?? '';
@@ -501,51 +627,132 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
       employerCodeController.text = data['employerCode'] ?? '';
       lengthYearsController.text = data['lengthYears'] ?? '';
       lengthMonthsController.text = data['lengthMonths'] ?? '';
-      employedFullTime = data['employedFullTime'] ?? true;
+      employedFullTime = _readBoolValue(data, [
+        'employedFullTime',
+        'full_staff',
+      ]);
       grossAnnualController.text = data['grossAnnual'] ?? '';
       netMonthlyController.text = data['netMonthly'] ?? '';
       workAddressController.text = data['workAddress'] ?? '';
       workCityController.text = data['workCity'] ?? '';
-      workProvince = data['workProvince'];
-      salaryFrequency = data['salaryFrequency'] ?? 'monthly';
+      workProvince = _mapToAllowedChoice(
+        _readStringValue(data, ['workProvince', 'work_province']),
+        const ['Northern', 'Central', 'Southern'],
+      );
+      salaryFrequency = _mapToAllowedChoice(
+        _readStringValue(data, ['salaryFrequency', 'work_salary_frequency']),
+        const ['monthly', 'weekly', 'other'],
+      );
 
       final salaryDateStr = data['salaryPayDate'];
       salaryPayDate = salaryDateStr != null
           ? DateTime.tryParse(salaryDateStr)
           : null;
 
-      bankNameController.text = data['bankName'] ?? '';
-      accountHolderController.text = data['accountHolder'] ?? '';
-      branchNameController.text = data['branchName'] ?? '';
-      branchCodeController.text = data['branchCode'] ?? '';
-      accountNumberController.text = data['accountNumber'] ?? '';
-      accountType = data['accountType'] ?? 'current';
-      salaryPaidIntoAccount = data['salaryPaidIntoAccount'] ?? true;
-      accountUsageYearsController.text = data['accountUsageYears'] ?? '';
-      accountUsageMonthsController.text = data['accountUsageMonths'] ?? '';
-      salaryTransferred3Months = data['salaryTransferred3Months'] ?? false;
+      bankNameController.text =
+          _readStringValue(data, ['bankName', 'bank_name']) ?? '';
+      accountHolderController.text =
+          _readStringValue(data, ['accountHolder', 'account_holder']) ?? '';
+      branchNameController.text =
+          _readStringValue(data, ['branchName', 'branch_name']) ?? '';
+      branchCodeController.text =
+          _readStringValue(data, ['branchCode', 'branch_code']) ?? '';
+      accountNumberController.text =
+          _readStringValue(data, ['accountNumber', 'account_number']) ?? '';
+      accountType = _mapToAllowedChoice(
+        _readStringValue(data, ['accountType', 'account_type']),
+        const ['current', 'savings'],
+      );
+      salaryPaidIntoAccount = _readBoolValue(data, [
+        'salaryPaidIntoAccount',
+        'is_salary_paid_to_this_account',
+      ]);
+      accountUsageYearsController.text =
+          _readStringValue(data, [
+            'accountUsageYears',
+            'account_usage_years',
+          ]) ??
+          '';
+      accountUsageMonthsController.text =
+          _readStringValue(data, [
+            'accountUsageMonths',
+            'account_usage_months',
+          ]) ??
+          '';
+      salaryTransferred3Months =
+          _readBoolValue(data, [
+            'salaryTransferred3Months',
+            'salary_been_transferred_for_3_months',
+          ]) ??
+          false;
 
-      totalAppliedController.text = data['totalApplied'] ?? '';
-      totalApprovedController.text = data['totalApproved'] ?? '';
-      cashToClientController.text = data['cashToClient'] ?? '';
-      loanPeriodController.text = data['loanPeriod'] ?? '';
-      adminFeeController.text = data['adminFee'] ?? '';
-      interestController.text = data['interest'] ?? '';
-      totalCollectableController.text = data['totalCollectable'] ?? '';
-      monthlyInstalmentController.text = data['monthlyInstalment'] ?? '';
-      loanpurpose = data['loanPurpose'];
-      loanPurposeController.text = data['loanPurposeText'] ?? '';
+      totalAppliedController.text =
+          _readStringValue(data, ['totalApplied', 'total_applied_for']) ?? '';
+      totalApprovedController.text =
+          _readStringValue(data, ['totalApproved', 'total_amount_approved']) ??
+          '';
+      cashToClientController.text =
+          _readStringValue(data, ['cashToClient', 'cash_to_client']) ?? '';
+      loanPeriodController.text =
+          _readStringValue(data, ['loanPeriod', 'loan_period']) ?? '';
+      adminFeeController.text =
+          _readStringValue(data, ['adminFee', 'admin_fee']) ?? '';
+      interestController.text = _readStringValue(data, ['interest']) ?? '';
+      totalCollectableController.text =
+          _readStringValue(data, ['totalCollectable', 'total_collectable']) ??
+          '';
+      monthlyInstalmentController.text =
+          _readStringValue(data, [
+            'monthlyInstalment',
+            'monthly_installment',
+          ]) ??
+          '';
+      loanpurpose = _mapToAllowedChoice(
+        _readStringValue(data, ['loanPurpose', 'loan_purpose']),
+        const ['education', 'housing', 'debt payment', 'funeral', 'other'],
+      );
+      loanPurposeController.text =
+          _readStringValue(data, ['loanPurposeText', 'loan_purpose_text']) ??
+          '';
 
       acceptedDeclaration = data['acceptedDeclaration'] ?? false;
 
-      clientSignaturePath = data['clientSignaturePath'];
-      identificationPath = data['identificationPath'];
-      identificationPathBack = data['identificationPathBack'];
-      latestPayslipPath = data['latestPayslipPath'];
-      bankStatementPath = data['bankStatementPath'];
-      employerLetterPath = data['employerLetterPath'];
-      customerPhoto = data['customerPhoto'];
-      self = data['self'];
+      clientSignaturePath = _readStringValue(data, [
+        'clientSignaturePath',
+        'client_signature_url',
+        'client_signature',
+      ]);
+      identificationPath = _readStringValue(data, [
+        'identificationPath',
+        'front_of_id_url',
+        'front_of_id',
+      ]);
+      identificationPathBack = _readStringValue(data, [
+        'identificationPathBack',
+        'back_of_id_url',
+        'back_of_id',
+      ]);
+      latestPayslipPath = _readStringValue(data, [
+        'latestPayslipPath',
+        'latest_payslip_url',
+        'latest_payslip',
+      ]);
+      bankStatementPath = _readStringValue(data, [
+        'bankStatementPath',
+        'bank_statement_url',
+        'bank_statement',
+      ]);
+      employerLetterPath = _readStringValue(data, [
+        'employerLetterPath',
+        'employer_letter_url',
+        'employer_letter',
+      ]);
+      customerPhoto = _readStringValue(data, [
+        'customerPhoto',
+        'customer_photo_url',
+        'customer_photo',
+      ]);
+      self = _readStringValue(data, ['self', 'selfie_url', 'selfie']);
 
       // 🔹 Rebuild File objects for image previews from the saved paths
       if (clientSignaturePath != null && clientSignaturePath!.isNotEmpty) {
@@ -643,9 +850,9 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
         "first_name": firstNameController.text.toString(),
         "id_number": idNumberController.text.toString(),
         "date_of_birth": dateOfBirth?.toIso8601String() ?? '',
-        "gender": gender,
+        "gender": gender ?? "",
         "number_of_dependants": dependantsController.text.toString(),
-        "marital_status": maritalStatus,
+        "marital_status": maritalStatus ?? "",
         "home_village_details": homeVillageController.text.toString(),
         "district": districtController.text.toString(),
         "traditional_authority": traditionalAuthorityController.text.toString(),
@@ -671,23 +878,25 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
         "employee_code": employerCodeController.text.toString(),
         "length_of_service_years": lengthYearsController.text.toString(),
         "length_of_service_months": lengthMonthsController.text.toString(),
-        "full_staff": employedFullTime == true ? "1" : "0",
+        "full_staff": employedFullTime == null
+            ? ""
+            : (employedFullTime! ? "1" : "0"),
         "gross_annual_salary": grossAnnualController.text.toString(),
         "net_monthly_income": netMonthlyController.text.toString(),
         "work_address": workAddressController.text.toString(),
         "work_city": workCityController.text.toString(),
         "work_province": workProvince?.toString().toLowerCase() ?? '',
-        "work_salary_frequency": salaryFrequency,
+        "work_salary_frequency": salaryFrequency ?? "",
         "salary_pay_date": salaryPayDate?.toIso8601String() ?? '',
         "bank_name": bankNameController.text.toString(),
         "account_holder": accountHolderController.text.toString(),
         "branch_name": branchNameController.text.toString(),
         "branch_code": branchCodeController.text.toString(),
         "account_number": accountNumberController.text.toString(),
-        "account_type": accountType,
-        "is_salary_paid_to_this_account": salaryPaidIntoAccount == true
-            ? "1"
-            : "0",
+        "account_type": accountType ?? "",
+        "is_salary_paid_to_this_account": salaryPaidIntoAccount == null
+            ? ""
+            : (salaryPaidIntoAccount! ? "1" : "0"),
         "account_usage_years": accountUsageYearsController.text.toString(),
         "account_usage_months": accountUsageMonthsController.text.toString(),
         "salary_been_transferred_for_3_months": salaryTransferred3Months == true
@@ -788,9 +997,9 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
             Future.delayed(const Duration(seconds: 2), () {
               if (!mounted) return;
               Navigator.of(dialogContext).pop();
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => Home()),
-              );
+              Navigator.of(
+                context,
+              ).pushReplacement(MaterialPageRoute(builder: (_) => Home()));
             });
 
             return const AlertDialog(
@@ -951,13 +1160,8 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
   void initState() {
     super.initState();
     getToken();
-
-    // ✅ Only load when an explicit draft is passed (from MyClients)
-    if (widget.draftData != null) {
-      
-      _loadFromData(widget.draftData!);
-    }
-    // no else: opening DigitalSignUp() -> always blank form
+    _clientIdFromPreview = widget.clientId;
+    Future.microtask(_loadInitialFormData);
 
     // initialize signature controller
     _signatureController = SignatureController(
@@ -1508,38 +1712,40 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
               ),
             ),
 
-          SizedBox(height: _digitalSignUpFieldGap),
+            SizedBox(height: _digitalSignUpFieldGap),
 
             InkWell(
-            onTap: () async {
-              final d = await _pickDate(context, dateOfBirth);
-              if (d != null) setState(() => dateOfBirth = d);
-            },
-            child: InputDecorator(
-              decoration: InputDecoration(
-                labelText: 'Date of Birth',
-                prefixIcon: const Icon(Icons.calendar_month_rounded),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+              onTap: () async {
+                final d = await _pickDate(context, dateOfBirth);
+                if (d != null) setState(() => dateOfBirth = d);
+              },
+              child: InputDecorator(
+                decoration: InputDecoration(
+                  labelText: 'Date of Birth',
+                  prefixIcon: const Icon(Icons.calendar_month_rounded),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  filled: true,
                 ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                filled: true,
-              ),
-              child: Text(
-                dateOfBirth == null
-                    ? 'Select your birthday'
-                    : "${dateOfBirth!.day}/${dateOfBirth!.month}/${dateOfBirth!.year}",
-                style: TextStyle(
-                  fontSize: 16,
-                  color: dateOfBirth == null ? Colors.grey.shade600 : Colors.black,
+                child: Text(
+                  dateOfBirth == null
+                      ? 'Select your birthday'
+                      : "${dateOfBirth!.day}/${dateOfBirth!.month}/${dateOfBirth!.year}",
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: dateOfBirth == null
+                        ? Colors.grey.shade600
+                        : Colors.black,
+                  ),
                 ),
               ),
             ),
-          ),
-  
+
             const SizedBox(height: _digitalSignUpFieldGap),
             Text('Gender'),
             Row(
@@ -1560,7 +1766,7 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
             ),
 
             const SizedBox(height: _digitalSignUpFieldGap),
-            
+
             TextFormField(
               controller: dependantsController,
               decoration: InputDecoration(
@@ -1586,6 +1792,7 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
             const SizedBox(height: _digitalSignUpFieldGap),
             DropdownButtonFormField<String>(
               value: maritalStatus,
+              hint: const Text('Select marital status'),
               decoration: InputDecoration(
                 labelText: 'Marital Status',
                 border: OutlineInputBorder(
@@ -1603,13 +1810,13 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              items: [
-                'single',
-                'married',
-                'divorced',
-              ].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-              onChanged: (v) =>
-                  setState(() => maritalStatus = v ?? maritalStatus),
+              items: ['single', 'married', 'divorced']
+                  .map(
+                    (t) =>
+                        DropdownMenuItem(value: t, child: Text(_titleCase(t))),
+                  )
+                  .toList(),
+              onChanged: (v) => setState(() => maritalStatus = v),
             ),
 
             const SizedBox(height: _digitalSignUpFieldGap),
@@ -2244,20 +2451,20 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
                     controller: lengthYearsController,
                     decoration: InputDecoration(
                       labelText: 'Length of Service (years)',
-                border: OutlineInputBorder(
-                  borderSide: BorderSide.none,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide.none,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(
-                    color: Colors.grey, // Grey border when focused
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                      border: OutlineInputBorder(
+                        borderSide: BorderSide.none,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide.none,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: Colors.grey, // Grey border when focused
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                     keyboardType: TextInputType.number,
                   ),
@@ -2268,20 +2475,20 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
                     controller: lengthMonthsController,
                     decoration: InputDecoration(
                       labelText: 'Months',
-                border: OutlineInputBorder(
-                  borderSide: BorderSide.none,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide.none,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(
-                    color: Colors.grey, // Grey border when focused
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                      border: OutlineInputBorder(
+                        borderSide: BorderSide.none,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide.none,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: Colors.grey, // Grey border when focused
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                     keyboardType: TextInputType.number,
                   ),
@@ -2421,6 +2628,7 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
             const SizedBox(height: _digitalSignUpFieldGap),
             DropdownButtonFormField<String>(
               value: salaryFrequency,
+              hint: const Text('Select salary frequency'),
               decoration: InputDecoration(
                 labelText: 'Salary Frequency',
                 border: OutlineInputBorder(
@@ -2438,13 +2646,13 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              items: [
-                'monthly',
-                'weekly',
-                'other',
-              ].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-              onChanged: (v) =>
-                  setState(() => salaryFrequency = v ?? salaryFrequency),
+              items: ['monthly', 'weekly', 'other']
+                  .map(
+                    (p) =>
+                        DropdownMenuItem(value: p, child: Text(_titleCase(p))),
+                  )
+                  .toList(),
+              onChanged: (v) => setState(() => salaryFrequency = v),
             ),
             ListTile(
               contentPadding: EdgeInsets.zero,
@@ -2594,6 +2802,7 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
             const SizedBox(height: _digitalSignUpFieldGap),
             DropdownButtonFormField<String>(
               value: accountType,
+              hint: const Text('Select account type'),
               decoration: InputDecoration(
                 labelText: 'Account Type',
                 border: OutlineInputBorder(
@@ -2611,11 +2820,13 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              items: [
-                'current',
-                'savings',
-              ].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-              onChanged: (v) => setState(() => accountType = v ?? accountType),
+              items: ['current', 'savings']
+                  .map(
+                    (t) =>
+                        DropdownMenuItem(value: t, child: Text(_titleCase(t))),
+                  )
+                  .toList(),
+              onChanged: (v) => setState(() => accountType = v),
             ),
             const SizedBox(height: _digitalSignUpFieldGap),
             Text('Is salary paid into this account?'),
@@ -2642,20 +2853,20 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
                     controller: accountUsageYearsController,
                     decoration: InputDecoration(
                       labelText: 'Usage (years)',
-                border: OutlineInputBorder(
-                  borderSide: BorderSide.none,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide.none,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(
-                    color: Colors.grey, // Grey border when focused
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                      border: OutlineInputBorder(
+                        borderSide: BorderSide.none,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide.none,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: Colors.grey, // Grey border when focused
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                     keyboardType: TextInputType.number,
                   ),
@@ -2666,20 +2877,20 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
                     controller: accountUsageMonthsController,
                     decoration: InputDecoration(
                       labelText: 'Months',
-                border: OutlineInputBorder(
-                  borderSide: BorderSide.none,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide.none,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(
-                    color: Colors.grey, // Grey border when focused
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                      border: OutlineInputBorder(
+                        borderSide: BorderSide.none,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide.none,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: Colors.grey, // Grey border when focused
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                     keyboardType: TextInputType.number,
                   ),
@@ -3254,7 +3465,9 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
 
   Widget _reviewImageRow(String label, String? filePath) {
     final hasFile =
-        filePath != null && filePath.trim().isNotEmpty && File(filePath).existsSync();
+        filePath != null &&
+        filePath.trim().isNotEmpty &&
+        File(filePath).existsSync();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
       child: Column(
@@ -3346,14 +3559,14 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
               padding: const EdgeInsets.all(12.0),
               child: Column(
                 children: [
-                  _reviewRow('Title', titleValue?.toUpperCase()),
+                  _reviewRow('Title', _titleCase(titleValue)),
                   _reviewRow('First Name', firstNameController.text),
                   _reviewRow('Surname', surnameController.text),
                   _reviewRow('ID Number', idNumberController.text),
                   _reviewRow('Date of Birth', _fmtDate(dateOfBirth)),
-                  _reviewRow('Gender', gender),
+                  _reviewRow('Gender', _titleCase(gender)),
                   _reviewRow('No. of Dependants', dependantsController.text),
-                  _reviewRow('Marital Status', maritalStatus),
+                  _reviewRow('Marital Status', _titleCase(maritalStatus)),
                   _reviewRow('Home District', districtController.text),
                   _reviewRow('Home TA', traditionalAuthorityController.text),
                   _reviewRow('Home Village', villageController.text),
@@ -3448,14 +3661,16 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
                   ),
                   _reviewRow(
                     'Full Time Staff',
-                    employedFullTime ? 'Yes' : 'No',
+                    employedFullTime == null
+                        ? '-'
+                        : (employedFullTime! ? 'Yes' : 'No'),
                   ),
                   _reviewRow('Gross Annual Salary', grossAnnualController.text),
                   _reviewRow('Net Monthly Income', netMonthlyController.text),
                   _reviewRow('Work Address', workAddressController.text),
                   _reviewRow('Work City/Town', workCityController.text),
                   _reviewRow('Work Region', workProvince),
-                  _reviewRow('Salary Frequency', salaryFrequency),
+                  _reviewRow('Salary Frequency', _titleCase(salaryFrequency)),
                   _reviewRow('Salary Pay Date', _fmtDate(salaryPayDate)),
                 ],
               ),
@@ -3474,10 +3689,12 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
                   _reviewRow('Branch Name', branchNameController.text),
                   _reviewRow('Branch Code', branchCodeController.text),
                   _reviewRow('Account Number', accountNumberController.text),
-                  _reviewRow('Account Type', accountType),
+                  _reviewRow('Account Type', _titleCase(accountType)),
                   _reviewRow(
                     'Salary Paid Into Account',
-                    salaryPaidIntoAccount ? 'Yes' : 'No',
+                    salaryPaidIntoAccount == null
+                        ? '-'
+                        : (salaryPaidIntoAccount! ? 'Yes' : 'No'),
                   ),
                   _reviewRow('Usage (years)', accountUsageYearsController.text),
                   _reviewRow(
@@ -3502,7 +3719,10 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
                 children: [
                   _reviewImageRow('Client Signature', clientSignaturePath),
                   _reviewImageRow('Identification (Front)', identificationPath),
-                  _reviewImageRow('Identification (Back)', identificationPathBack),
+                  _reviewImageRow(
+                    'Identification (Back)',
+                    identificationPathBack,
+                  ),
                   _reviewImageRow('Customer Photo', customerPhoto),
                   _reviewImageRow('Self (Customer and Agent)', self),
                   _reviewImageRow('Latest Payslip', latestPayslipPath),
