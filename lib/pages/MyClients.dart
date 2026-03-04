@@ -28,6 +28,8 @@ class MyClients extends StatefulWidget {
 class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
   bool listAvailable = false;
   List<Map<String, dynamic>> _clients = [];
+  bool _selectionMode = false;
+  final Set<String> _selectedDraftKeys = <String>{};
 
   // filter
   String _selectedFilter = 'all';
@@ -130,6 +132,19 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
     return s;
   }
 
+  String _toTitleCase(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return trimmed;
+    return trimmed
+        .split(' ')
+        .where((part) => part.isNotEmpty)
+        .map(
+          (part) =>
+              '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}',
+        )
+        .join(' ');
+  }
+
   /// Extract the SAME "server id" you used when sending to /registrations/status.
   /// (From your code: you collect id_number for analog and id_number/id for digital)
   String? _extractServerIdFromClient(Map<String, dynamic> client) {
@@ -173,6 +188,55 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
     setState(() {
       _clients = clients;
       listAvailable = _clients.isNotEmpty;
+      final availableDraftKeys = clients
+          .where(_isLocalDraftClient)
+          .map(_draftSelectionKey)
+          .toSet();
+      _selectedDraftKeys.removeWhere((k) => !availableDraftKeys.contains(k));
+      if (_selectedDraftKeys.isEmpty) {
+        _selectionMode = false;
+      }
+    });
+  }
+
+  bool _isLocalDraftClient(Map<String, dynamic> client) {
+    return client['storage']?.toString() == 'local' &&
+        _normalizeStatus(client['status']?.toString()) == 'draft';
+  }
+
+  String _draftSelectionKey(Map<String, dynamic> client) {
+    final source = client['source']?.toString() ?? 'analog';
+    final id = client['id']?.toString() ?? '';
+    return '$source|$id';
+  }
+
+  void _exitSelectionMode() {
+    setState(() {
+      _selectionMode = false;
+      _selectedDraftKeys.clear();
+    });
+  }
+
+  void _selectDraft(Map<String, dynamic> client) {
+    if (!_isLocalDraftClient(client)) return;
+    setState(() {
+      _selectionMode = true;
+      _selectedDraftKeys.add(_draftSelectionKey(client));
+    });
+  }
+
+  void _toggleDraftSelection(Map<String, dynamic> client) {
+    if (!_isLocalDraftClient(client)) return;
+    final key = _draftSelectionKey(client);
+    setState(() {
+      if (_selectedDraftKeys.contains(key)) {
+        _selectedDraftKeys.remove(key);
+      } else {
+        _selectedDraftKeys.add(key);
+      }
+      if (_selectedDraftKeys.isEmpty) {
+        _selectionMode = false;
+      }
     });
   }
 
@@ -558,7 +622,9 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
         .where((reg) => _normalizeStatus(reg.status?.toString()) == 'draft')
         .map<Map<String, dynamic>>((reg) {
           final data = Map<String, dynamic>.from(reg.data);
-          final title = (data['titleValue'] ?? '').toString().trim();
+          final title = _toTitleCase(
+            (data['titleValue'] ?? '').toString().trim(),
+          );
           final firstName = (data['firstName'] ?? '').toString().trim();
           final surname = (data['surname'] ?? '').toString().trim();
           final nameParts = [
@@ -597,7 +663,9 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
       try {
         final decoded = jsonDecode(dataRaw.toString());
         if (decoded is Map<String, dynamic>) {
-          final title = (decoded['titleValue'] ?? '').toString().trim();
+          final title = _toTitleCase(
+            (decoded['titleValue'] ?? '').toString().trim(),
+          );
           final firstName = (decoded['firstName'] ?? '').toString().trim();
           final surname = (decoded['surname'] ?? '').toString().trim();
 
@@ -679,17 +747,23 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _deleteClient(Map<String, dynamic> client) async {
-    final int? id = client['id'] as int?;
-    if (id == null) return;
-
-    final source = client['source']?.toString() ?? 'analog';
-
+  Future<void> _deleteClientByIdAndSource({
+    required int id,
+    required String source,
+  }) async {
     if (source == 'digital') {
       await DigitalRegistrationDb.instance.delete(id);
     } else {
       await DatabaseHelper.instance.deleteData(id);
     }
+  }
+
+  Future<void> _deleteClient(Map<String, dynamic> client) async {
+    final int? id = client['id'] as int?;
+    if (id == null) return;
+
+    final source = client['source']?.toString() ?? 'analog';
+    await _deleteClientByIdAndSource(id: id, source: source);
 
     await _loadClients();
     await _rebuildIdMaps();
@@ -699,6 +773,72 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: const Text("Client deleted"),
+        backgroundColor: AppColors.danger,
+      ),
+    );
+  }
+
+  Future<void> _deleteSelectedDrafts() async {
+    if (_selectedDraftKeys.isEmpty) return;
+
+    final targets = _clients
+        .where(_isLocalDraftClient)
+        .where((c) => _selectedDraftKeys.contains(_draftSelectionKey(c)))
+        .toList();
+    if (targets.isEmpty) {
+      _exitSelectionMode();
+      return;
+    }
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: Colors.white,
+        title: const Text("Delete drafts"),
+        content: Text(
+          "Delete ${targets.length} selected draft${targets.length == 1 ? '' : 's'}?",
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.success,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.danger,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text("Delete"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    for (final client in targets) {
+      final id = client['id'] as int?;
+      if (id == null) continue;
+      final source = client['source']?.toString() ?? 'analog';
+      await _deleteClientByIdAndSource(id: id, source: source);
+    }
+
+    _exitSelectionMode();
+    await _loadClients();
+    await _rebuildIdMaps();
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          "Deleted ${targets.length} draft${targets.length == 1 ? '' : 's'}",
+        ),
         backgroundColor: AppColors.danger,
       ),
     );
@@ -1138,7 +1278,9 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
                                 Row(
                                   children: [
                                     Text(
-                                      "Clients",
+                                      _selectionMode
+                                          ? "${_selectedDraftKeys.length} selected"
+                                          : "Clients",
                                       style: TextStyle(
                                         fontSize: 18,
                                         fontWeight: FontWeight.w600,
@@ -1146,27 +1288,48 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
                                       ),
                                     ),
                                     const SizedBox(width: 8),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 10,
-                                        vertical: 4,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: AppColors.primary.withOpacity(
-                                          0.1,
+                                    if (!_selectionMode)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 4,
                                         ),
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: Text(
-                                        "${_clients.length}",
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                          color: AppColors.primary,
+                                        decoration: BoxDecoration(
+                                          color: AppColors.primary.withOpacity(
+                                            0.1,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          _selectionMode
+                                              ? "${_selectedDraftKeys.length}"
+                                              : "${_clients.length}",
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color: AppColors.primary,
+                                          ),
                                         ),
                                       ),
-                                    ),
                                     const Spacer(),
+                                    if (_selectionMode) ...[
+                                      TextButton(
+                                        onPressed: _exitSelectionMode,
+                                        child: const Text("Cancel"),
+                                      ),
+                                      IconButton(
+                                        tooltip: "Delete selected drafts",
+                                        onPressed: _selectedDraftKeys.isEmpty
+                                            ? null
+                                            : _deleteSelectedDrafts,
+                                        icon: const Icon(
+                                          Icons.delete,
+                                          color: AppColors.danger,
+                                        ),
+                                      ),
+                                    ],
 
                                     // ✅ LIVE/ERROR indicator (no spinner)
                                     Container(
@@ -1223,7 +1386,9 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
                                 ),
                                 const SizedBox(height: 8),
                                 Text(
-                                  "Tap a client to view details or long press for more options.",
+                                  _selectionMode
+                                      ? "Tap draft cards to select or unselect."
+                                      : "Tap a client to view details or long press for more options.",
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: AppColors.textSecondary,
@@ -1243,23 +1408,70 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
                                           itemBuilder: (context, index) {
                                             final client =
                                                 _filteredClients[index];
+                                            final isLocalDraft =
+                                                _isLocalDraftClient(client);
+                                            final isSelected =
+                                                _selectedDraftKeys.contains(
+                                                  _draftSelectionKey(client),
+                                                );
                                             return GestureDetector(
-                                              onLongPress:
-                                                  client['storage']
-                                                          ?.toString() ==
-                                                      'local'
-                                                  ? () =>
-                                                        _showEditDeleteOptions(
-                                                          client,
-                                                        )
-                                                  : null,
-                                              onTap: () => _openClient(client),
-                                              child: buildClientItem(
-                                                _getClientName(client),
-                                                _getEffectiveStatus(client),
-                                                reason: _getReasonForClient(
-                                                  client,
-                                                ),
+                                              onLongPress: () {
+                                                if (_selectionMode) {
+                                                  if (isLocalDraft) {
+                                                    _toggleDraftSelection(
+                                                      client,
+                                                    );
+                                                  }
+                                                  return;
+                                                }
+                                                if (isLocalDraft) {
+                                                  _selectDraft(client);
+                                                  return;
+                                                }
+                                                if (client['storage']
+                                                        ?.toString() ==
+                                                    'local') {
+                                                  _showEditDeleteOptions(
+                                                    client,
+                                                  );
+                                                }
+                                              },
+                                              onTap: () {
+                                                if (_selectionMode) {
+                                                  if (isLocalDraft) {
+                                                    _toggleDraftSelection(
+                                                      client,
+                                                    );
+                                                  }
+                                                  return;
+                                                }
+                                                _openClient(client);
+                                              },
+                                              child: Row(
+                                                children: [
+                                                  if (_selectionMode &&
+                                                      isLocalDraft)
+                                                    Checkbox(
+                                                      value: isSelected,
+                                                      onChanged: (_) =>
+                                                          _toggleDraftSelection(
+                                                            client,
+                                                          ),
+                                                    ),
+                                                  Expanded(
+                                                    child: buildClientItem(
+                                                      _getClientName(client),
+                                                      _getEffectiveStatus(
+                                                        client,
+                                                      ),
+                                                      reason:
+                                                          _getReasonForClient(
+                                                            client,
+                                                          ),
+                                                      selected: isSelected,
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                             );
                                           },
@@ -1293,7 +1505,12 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
 }
 
 // ================= CLIENT ITEM CARD =================
-Widget buildClientItem(String name, String statusRaw, {String? reason}) {
+Widget buildClientItem(
+  String name,
+  String statusRaw, {
+  String? reason,
+  bool selected = false,
+}) {
   final status = statusRaw.toString().toLowerCase().trim();
 
   Color statusColor;
@@ -1336,10 +1553,17 @@ Widget buildClientItem(String name, String statusRaw, {String? reason}) {
     decoration: BoxDecoration(
       color: AppColors.cardBackground,
       borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: AppColors.primary.withOpacity(0.06)),
+      border: Border.all(
+        color: selected
+            ? AppColors.primary
+            : AppColors.primary.withOpacity(0.06),
+        width: selected ? 1.4 : 1,
+      ),
       boxShadow: [
         BoxShadow(
-          color: Colors.black.withOpacity(0.06),
+          color: selected
+              ? AppColors.primary.withOpacity(0.16)
+              : Colors.black.withOpacity(0.06),
           blurRadius: 8,
           offset: const Offset(0, 4),
         ),
