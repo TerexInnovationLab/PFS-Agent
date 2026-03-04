@@ -66,7 +66,8 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
   }
 
   Future<void> _bootstrap() async {
-    final cachedClients = await ClientListCacheService.instance.getCachedClients();
+    final cachedClients = await ClientListCacheService.instance
+        .getCachedClients();
     if (mounted && cachedClients.isNotEmpty) {
       final mergedCached = await _mergeWithCurrentLocalDrafts(cachedClients);
       _applyClients(mergedCached);
@@ -284,6 +285,10 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
         await _rebuildIdMaps();
       }
 
+      // Keep local draft changes (new/edit/delete) reflected immediately
+      // even when this screen stays mounted in bottom navigation.
+      await _refreshVisibleClientsWithLatestLocalDrafts();
+
       // No clients? Nothing to poll.
       if (_clients.isEmpty) {
         return;
@@ -481,15 +486,55 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _refreshVisibleClientsWithLatestLocalDrafts() async {
+    final latestLocalDrafts = await _loadCurrentLocalDrafts();
+    final nonLocalClients = _clients
+        .where((client) {
+          final storage = client['storage']?.toString();
+          final status = _normalizeStatus(client['status']?.toString());
+          return !(storage == 'local' || status == 'draft');
+        })
+        .map((client) => Map<String, dynamic>.from(client))
+        .toList();
+
+    final combined = [...latestLocalDrafts, ...nonLocalClients];
+    if (_clientsFingerprint(_clients) == _clientsFingerprint(combined)) {
+      return;
+    }
+
+    if (!mounted) return;
+    _applyClients(combined);
+    await ClientListCacheService.instance.saveClients(combined);
+  }
+
+  String _clientsFingerprint(List<Map<String, dynamic>> clients) {
+    return clients
+        .map((client) {
+          final payload = client['form_data'] ?? client['data'] ?? '';
+          return [
+            client['id'],
+            client['source'],
+            client['storage'],
+            client['status'],
+            client['information'],
+            payload,
+          ].map((part) => part?.toString() ?? '').join('|');
+        })
+        .join('||');
+  }
+
   Future<List<Map<String, dynamic>>> _mergeWithCurrentLocalDrafts(
     List<Map<String, dynamic>> baseClients,
   ) async {
     final currentLocalDrafts = await _loadCurrentLocalDrafts();
-    final nonLocalClients = baseClients.where((client) {
-      final storage = client['storage']?.toString();
-      final status = _normalizeStatus(client['status']?.toString());
-      return !(storage == 'local' || status == 'draft');
-    }).map((client) => Map<String, dynamic>.from(client)).toList();
+    final nonLocalClients = baseClients
+        .where((client) {
+          final storage = client['storage']?.toString();
+          final status = _normalizeStatus(client['status']?.toString());
+          return !(storage == 'local' || status == 'draft');
+        })
+        .map((client) => Map<String, dynamic>.from(client))
+        .toList();
 
     return [...currentLocalDrafts, ...nonLocalClients];
   }
@@ -516,20 +561,25 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
           final title = (data['titleValue'] ?? '').toString().trim();
           final firstName = (data['firstName'] ?? '').toString().trim();
           final surname = (data['surname'] ?? '').toString().trim();
-          final nameParts = [title, firstName, surname]
-              .where((part) => part.isNotEmpty)
-              .toList();
+          final nameParts = [
+            title,
+            firstName,
+            surname,
+          ].where((part) => part.isNotEmpty).toList();
 
           return {
             'id': reg.id,
             'status': 'draft',
             'reason': reg.reason,
-            'information': nameParts.isNotEmpty ? nameParts.join(' ') : 'No Name',
+            'information': nameParts.isNotEmpty
+                ? nameParts.join(' ')
+                : 'No Name',
             'data': jsonEncode(data),
             'source': 'digital',
             'storage': 'local',
           };
-        }).toList();
+        })
+        .toList();
 
     return [...analogDrafts, ...digitalDrafts];
   }
@@ -1196,13 +1246,13 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
                                             return GestureDetector(
                                               onLongPress:
                                                   client['storage']
-                                                              ?.toString() ==
-                                                          'local'
-                                                      ? () =>
-                                                            _showEditDeleteOptions(
-                                                              client,
-                                                            )
-                                                      : null,
+                                                          ?.toString() ==
+                                                      'local'
+                                                  ? () =>
+                                                        _showEditDeleteOptions(
+                                                          client,
+                                                        )
+                                                  : null,
                                               onTap: () => _openClient(client),
                                               child: buildClientItem(
                                                 _getClientName(client),
