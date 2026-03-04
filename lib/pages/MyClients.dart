@@ -1317,7 +1317,12 @@ class MyClientsState extends State<MyClients> with WidgetsBindingObserver {
                                     if (_selectionMode) ...[
                                       TextButton(
                                         onPressed: _exitSelectionMode,
-                                        child: const Text("Cancel"),
+                                        child: const Text(
+                                          "Cancel",
+                                          style: TextStyle(
+                                            color: AppColors.success,
+                                          ),
+                                        ),
                                       ),
                                       IconButton(
                                         tooltip: "Delete selected drafts",
