@@ -4,6 +4,7 @@ import 'package:pfs_agent/layouts/Colors.dart';
 import 'package:pfs_agent/pages/MyClients.dart';
 import 'package:pfs_agent/pages/dashboardpage.dart';
 import 'package:pfs_agent/pages/ProfilePage.dart';
+import 'package:pfs_agent/services/client_list_cache_service.dart';
 
 
 
@@ -20,6 +21,8 @@ class HomeState extends State<Home> {
   void initState() {
     super.initState();
     _pageController = PageController(initialPage: _selectedIndex);
+    // Warm the clients cache at session start so the tab opens instantly.
+    ClientListCacheService.instance.warmUp();
   }
 
   @override

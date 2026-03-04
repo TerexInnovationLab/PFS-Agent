@@ -56,8 +56,7 @@ class _MyAppState extends State<MyApp> {
       home: Splash(), 
     //  home: OTPResetCodePage(email: "user@example.com"),
     //  home: VerifyPage(email: "user@example.com"), 
-
     //  home: ResetPasswordPage(),
     );
   }
-} 
+}  
