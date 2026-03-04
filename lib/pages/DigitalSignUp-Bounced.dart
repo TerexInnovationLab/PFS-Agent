@@ -495,10 +495,18 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
     return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
   }
 
-  String? _mapToAllowedChoice(String? raw, List<String> allowed) {
+  String? _mapToAllowedChoice(
+    String? raw,
+    List<String> allowed, {
+    Map<String, String>? aliases,
+  }) {
     if (raw == null) return null;
     final normalizedRaw = _compactChoice(raw.trim());
     if (normalizedRaw.isEmpty) return null;
+    if (aliases != null && aliases.containsKey(normalizedRaw)) {
+      final mapped = aliases[normalizedRaw];
+      if (mapped != null && allowed.contains(mapped)) return mapped;
+    }
     for (final option in allowed) {
       if (_compactChoice(option) == normalizedRaw) return option;
     }
@@ -510,8 +518,21 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
       'id',
       'client_id',
       'id_number',
+      'idNumber',
       'server_id',
     ]);
+  }
+
+  void _mergePreferNonEmpty(
+    Map<String, dynamic> target,
+    Map<String, dynamic> incoming,
+  ) {
+    for (final entry in incoming.entries) {
+      final value = entry.value;
+      if (value == null) continue;
+      if (value is String && value.trim().isEmpty) continue;
+      target[entry.key] = value;
+    }
   }
 
   Future<Map<String, dynamic>?> _loadLocalDataByClientId(
@@ -522,6 +543,11 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
 
     final rows = await DigitalRegistrationDb.instance.getAll();
     for (final row in rows) {
+      if (row.id != null && row.id.toString() == clientId.trim()) {
+        _localId = row.id;
+        return Map<String, dynamic>.from(row.data);
+      }
+
       final rowId = _extractComparableId(row.data)?.trim().toLowerCase();
       if (rowId == null || rowId.isEmpty) continue;
       if (rowId == normalizedClientId) {
@@ -533,25 +559,38 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
   }
 
   Future<void> _loadInitialFormData() async {
+    final merged = <String, dynamic>{};
+    if (widget.clientPreviewData != null) {
+      _mergePreferNonEmpty(
+        merged,
+        Map<String, dynamic>.from(widget.clientPreviewData!),
+      );
+    }
+
     Map<String, dynamic>? sourceData;
+    final currentClientId = id;
+    if (currentClientId != null && currentClientId.trim().isNotEmpty) {
+      final localData = await _loadLocalDataByClientId(currentClientId);
+      if (localData != null) {
+        sourceData = localData;
+        _mergePreferNonEmpty(merged, localData);
+      }
+    }
 
     if (widget.draftData != null) {
-      sourceData = Map<String, dynamic>.from(widget.draftData!);
+      final draftData = Map<String, dynamic>.from(widget.draftData!);
+      sourceData = draftData;
+      _mergePreferNonEmpty(merged, draftData);
     }
 
-    final currentClientId = id;
-    if (sourceData == null &&
-        currentClientId != null &&
-        currentClientId.trim().isNotEmpty) {
-      sourceData = await _loadLocalDataByClientId(currentClientId);
+    if (!mounted) return;
+    if (merged.isNotEmpty) {
+      _loadFromData(merged);
+      return;
     }
-
-    if (sourceData == null && widget.clientPreviewData != null) {
-      sourceData = Map<String, dynamic>.from(widget.clientPreviewData!);
+    if (sourceData != null) {
+      _loadFromData(sourceData);
     }
-
-    if (!mounted || sourceData == null) return;
-    _loadFromData(sourceData);
   }
 
   void _loadFromData(Map<String, dynamic> data) {
@@ -559,6 +598,7 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
       titleValue = _mapToAllowedChoice(
         _readStringValue(data, ['titleValue', 'title']),
         const ['mr', 'mrs', 'miss', 'dr', 'prof'],
+        aliases: const {'mister': 'mr', 'missus': 'mrs'},
       );
       surnameController.text = _readStringValue(data, ['surname']) ?? '';
       firstNameController.text =
@@ -569,15 +609,27 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
       final dobStr = _readStringValue(data, ['dateOfBirth', 'date_of_birth']);
       dateOfBirth = dobStr != null ? DateTime.tryParse(dobStr) : null;
 
-      gender = _mapToAllowedChoice(_readStringValue(data, ['gender']), const [
-        'male',
-        'female',
-      ]);
+      gender = _mapToAllowedChoice(
+        _readStringValue(data, ['gender']),
+        const ['male', 'female'],
+        aliases: const {
+          'm': 'male',
+          'f': 'female',
+          'man': 'male',
+          'woman': 'female',
+        },
+      );
       dependantsController.text =
           _readStringValue(data, ['dependants', 'number_of_dependants']) ?? '';
       maritalStatus = _mapToAllowedChoice(
         _readStringValue(data, ['maritalStatus', 'marital_status']),
-        const ['single', 'married', 'divorced'],
+        const ['single', 'married', 'divorced', 'widowed'],
+        aliases: const {
+          'notmarried': 'single',
+          'unmarried': 'single',
+          'widow': 'widowed',
+          'widower': 'widowed',
+        },
       );
       districtController.text =
           _readStringValue(data, ['homeDistrict', 'district']) ?? '';
@@ -596,6 +648,13 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
       province = _mapToAllowedChoice(
         _readStringValue(data, ['province']),
         const ['Northern', 'Central', 'Southern'],
+        aliases: const {
+          'north': 'Northern',
+          'northernregion': 'Northern',
+          'centralregion': 'Central',
+          'south': 'Southern',
+          'southernregion': 'Southern',
+        },
       );
 
       workTelController.text =
@@ -609,45 +668,85 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
       email1Controller.text = _readStringValue(data, ['email1']) ?? '';
       email2Controller.text = _readStringValue(data, ['email2']) ?? '';
 
-      famSurnameController.text = data['famSurname'] ?? '';
-      famFirstNameController.text = data['famFirstName'] ?? '';
+      famSurnameController.text =
+          _readStringValue(data, ['famSurname', 'fam_surname']) ?? '';
+      famFirstNameController.text =
+          _readStringValue(data, ['famFirstName', 'fam_first_name']) ?? '';
       famTitle = _mapToAllowedChoice(
         _readStringValue(data, ['famTitle', 'fam_title']),
-        const ['mr', 'mrs', 'miss', 'dr'],
+        const ['mr', 'mrs', 'miss', 'dr', 'prof'],
+        aliases: const {'mister': 'mr', 'missus': 'mrs'},
       );
-      famRelationController.text = data['famRelation'] ?? '';
-      famHomeTelController.text = data['famHomeTel'] ?? '';
-      famMobileController.text = data['famMobile'] ?? '';
-      famAddressController.text = data['famAddress'] ?? '';
+      famRelationController.text =
+          _readStringValue(data, ['famRelation', 'fam_relation']) ?? '';
+      famHomeTelController.text =
+          _readStringValue(data, ['famHomeTel', 'fam_home_tel_no']) ?? '';
+      famMobileController.text =
+          _readStringValue(data, ['famMobile', 'fam_mobile_tel_no']) ?? '';
+      famAddressController.text =
+          _readStringValue(data, ['famAddress', 'fam_address']) ?? '';
 
-      employerNameController.text = data['employerName'] ?? '';
-      employerSpecificController.text = data['specificEmployer'] ?? '';
-      departmentController.text = data['department'] ?? '';
-      jobTitleController.text = data['jobTitle'] ?? '';
-      employerCodeController.text = data['employerCode'] ?? '';
-      lengthYearsController.text = data['lengthYears'] ?? '';
-      lengthMonthsController.text = data['lengthMonths'] ?? '';
+      employerNameController.text =
+          _readStringValue(data, ['employerName', 'employer_name']) ?? '';
+      employerSpecificController.text =
+          _readStringValue(data, ['specificEmployer', 'specific_employer']) ??
+          '';
+      departmentController.text = _readStringValue(data, ['department']) ?? '';
+      jobTitleController.text =
+          _readStringValue(data, ['jobTitle', 'job_title']) ?? '';
+      employerCodeController.text =
+          _readStringValue(data, ['employerCode', 'employee_code']) ?? '';
+      lengthYearsController.text =
+          _readStringValue(data, ['lengthYears', 'length_of_service_years']) ??
+          '';
+      lengthMonthsController.text =
+          _readStringValue(data, [
+            'lengthMonths',
+            'length_of_service_months',
+          ]) ??
+          '';
       employedFullTime = _readBoolValue(data, [
         'employedFullTime',
         'full_staff',
+        'fullTimeStaff',
       ]);
-      grossAnnualController.text = data['grossAnnual'] ?? '';
-      netMonthlyController.text = data['netMonthly'] ?? '';
-      workAddressController.text = data['workAddress'] ?? '';
-      workCityController.text = data['workCity'] ?? '';
+      grossAnnualController.text =
+          _readStringValue(data, ['grossAnnual', 'gross_annual_salary']) ?? '';
+      netMonthlyController.text =
+          _readStringValue(data, ['netMonthly', 'net_monthly_income']) ?? '';
+      workAddressController.text =
+          _readStringValue(data, ['workAddress', 'work_address']) ?? '';
+      workCityController.text =
+          _readStringValue(data, ['workCity', 'work_city']) ?? '';
       workProvince = _mapToAllowedChoice(
         _readStringValue(data, ['workProvince', 'work_province']),
         const ['Northern', 'Central', 'Southern'],
+        aliases: const {
+          'north': 'Northern',
+          'northernregion': 'Northern',
+          'centralregion': 'Central',
+          'south': 'Southern',
+          'southernregion': 'Southern',
+        },
       );
       salaryFrequency = _mapToAllowedChoice(
         _readStringValue(data, ['salaryFrequency', 'work_salary_frequency']),
-        const ['monthly', 'weekly', 'other'],
+        const ['monthly', 'weekly', 'fortnightly', 'other'],
+        aliases: const {
+          'biweekly': 'fortnightly',
+          'annually': 'other',
+          'yearly': 'other',
+          'daily': 'other',
+        },
       );
 
       final salaryDateStr = data['salaryPayDate'];
+      final salaryDateFallback = _readStringValue(data, ['salary_pay_date']);
       salaryPayDate = salaryDateStr != null
           ? DateTime.tryParse(salaryDateStr)
-          : null;
+          : (salaryDateFallback != null
+                ? DateTime.tryParse(salaryDateFallback)
+                : null);
 
       bankNameController.text =
           _readStringValue(data, ['bankName', 'bank_name']) ?? '';
@@ -662,6 +761,13 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
       accountType = _mapToAllowedChoice(
         _readStringValue(data, ['accountType', 'account_type']),
         const ['current', 'savings'],
+        aliases: const {
+          'saving': 'savings',
+          'savingsaccount': 'savings',
+          'currentaccount': 'current',
+          'checking': 'current',
+          'cheque': 'current',
+        },
       );
       salaryPaidIntoAccount = _readBoolValue(data, [
         'salaryPaidIntoAccount',
@@ -683,6 +789,7 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
           _readBoolValue(data, [
             'salaryTransferred3Months',
             'salary_been_transferred_for_3_months',
+            'salaryTransferredFor3Months',
           ]) ??
           false;
 
@@ -707,13 +814,28 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
             'monthly_installment',
           ]) ??
           '';
-      loanpurpose = _mapToAllowedChoice(
-        _readStringValue(data, ['loanPurpose', 'loan_purpose']),
-        const ['education', 'housing', 'debt payment', 'funeral', 'other'],
-      );
+      final loanPurposeRaw = _readStringValue(data, [
+        'loanPurpose',
+        'loan_purpose',
+      ]);
+      loanpurpose = _mapToAllowedChoice(loanPurposeRaw, const [
+        'education',
+        'housing',
+        'debt payment',
+        'funeral',
+        'other',
+      ]);
       loanPurposeController.text =
           _readStringValue(data, ['loanPurposeText', 'loan_purpose_text']) ??
           '';
+      if (loanpurpose == null &&
+          loanPurposeRaw != null &&
+          loanPurposeRaw.trim().isNotEmpty) {
+        loanpurpose = 'other';
+        if (loanPurposeController.text.trim().isEmpty) {
+          loanPurposeController.text = loanPurposeRaw.trim();
+        }
+      }
 
       acceptedDeclaration = data['acceptedDeclaration'] ?? false;
 
@@ -1810,7 +1932,7 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              items: ['single', 'married', 'divorced']
+              items: ['single', 'married', 'divorced', 'widowed']
                   .map(
                     (t) =>
                         DropdownMenuItem(value: t, child: Text(_titleCase(t))),
@@ -2212,7 +2334,7 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              items: ['Mr', 'Mrs', 'Miss', 'Dr']
+              items: ['Mr', 'Mrs', 'Miss', 'Dr', 'Prof']
                   .map(
                     (t) => DropdownMenuItem(
                       value: t.toLowerCase(), // store lowercase value
@@ -2646,7 +2768,7 @@ class DigitalSignUpBouncedState extends State<DigitalSignUpBounced> {
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              items: ['monthly', 'weekly', 'other']
+              items: ['monthly', 'weekly', 'fortnightly', 'other']
                   .map(
                     (p) =>
                         DropdownMenuItem(value: p, child: Text(_titleCase(p))),
